@@ -12,6 +12,25 @@
  * the libraries' full APIs would invite use of members that have not been
  * thought about on this side of the boundary.
  */
+declare module 'react-native-audio-api' {
+  /**
+   * Its Web Audio implementation. Declared rather than installed for the same
+   * reason as the modules below — and because installing it drags React Native
+   * itself into this package's dev tree, where it cannot run anyway.
+   *
+   * Only what `playback.rn.ts` touches is declared. Tone is handed this object
+   * as its context, and whether Tone accepts it is the open question recorded
+   * in `spikes/tone-on-rn-audio-api.md`; a wider stub here would imply an
+   * answer nobody has.
+   */
+  export class AudioContext {
+    readonly currentTime: number;
+    readonly destination: unknown;
+    close(): void;
+    resume(): Promise<void>;
+  }
+}
+
 declare module 'react-native-fs' {
   export const CachesDirectoryPath: string;
   export function writeFile(path: string, contents: string, encoding: string): Promise<void>;
