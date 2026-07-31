@@ -1,6 +1,6 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Platform implementations for ScoreSmith: playback, XML parsing, file export and MIDI codecs, for web and React Native",
   "type": "module",
   "exports": {

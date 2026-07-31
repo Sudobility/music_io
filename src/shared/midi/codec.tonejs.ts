@@ -1,5 +1,25 @@
-import { Midi } from '@tonejs/midi';
+import * as midiModule from '@tonejs/midi';
 import type { MidiCodec, MidiControlChange, MidiFile, MidiTrackData } from '@sudobility/music_types';
+
+type MidiConstructor = typeof import('@tonejs/midi').Midi;
+
+/**
+ * `@tonejs/midi` publishes CommonJS as `main` and ESM only via `module`, with
+ * no `exports` map — so whether a named import works depends entirely on which
+ * build the resolver picked. Bun and Vite pick the ESM build and a named import
+ * is fine; Node's ESM loader takes `main` and cannot always detect the named
+ * exports of a bundled CommonJS file, which fails at import time with
+ * "Named export 'Midi' not found".
+ *
+ * Reading the constructor off the namespace instead works under every resolver.
+ * This is the concrete cost of the one CommonJS dependency in the family.
+ */
+const namespace = midiModule as unknown as { Midi?: MidiConstructor; default?: { Midi: MidiConstructor } };
+const Midi: MidiConstructor = namespace.Midi ?? namespace.default?.Midi ?? missingMidi();
+
+function missingMidi(): never {
+  throw new Error('@tonejs/midi did not export Midi under any known module shape.');
+}
 
 /**
  * `@tonejs/midi` behind the neutral model.
