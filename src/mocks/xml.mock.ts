@@ -5,11 +5,11 @@ import type { XmlElement, XmlParser } from '@sudobility/music_types';
  * A deliberately small XML reader, so the mocks entry needs no DOM and no
  * parser dependency.
  *
- * It handles elements, attributes and text — enough for the contract suite and
- * for tests that just need *an* XmlElement. It is not a general XML parser (no
- * namespaces, entities, CDATA or comments) and is not exported from the package
- * root for that reason: anything real should use the web or React Native
- * parser.
+ * It handles elements, attributes and text, and skips the XML declaration,
+ * comments and DOCTYPE — enough to read real MusicXML in a test, which is what
+ * music_lib's importer suite needs. It is deliberately not a general XML parser
+ * (no namespaces, entities or CDATA) and is not exported from the package root
+ * for that reason: anything real should use the web or React Native parser.
  */
 type Node = { tagName: string; attributes: Record<string, string>; children: Node[]; text: string };
 
@@ -22,7 +22,16 @@ function parseAttributes(source: string): Record<string, string> {
   return attributes;
 }
 
-function parseNodes(text: string): Node {
+/** Strips the XML declaration, comments and DOCTYPE, none of which carry data. */
+function stripPreamble(text: string): string {
+  return text
+    .replace(/<\?[\s\S]*?\?>/g, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!DOCTYPE[^>[]*(\[[\s\S]*?\])?\s*>/gi, '');
+}
+
+function parseNodes(rawText: string): Node {
+  const text = stripPreamble(rawText);
   const stack: Node[] = [];
   let root: Node | null = null;
 
