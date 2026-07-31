@@ -98,7 +98,7 @@ vi.mock('tone', () => {
 
 import * as Tone from 'tone';
 import { createInstrument, resolveInstrumentCategory } from './instruments.js';
-import { GM_INSTRUMENTS } from '../../domain/instruments/gm.js';
+import { GM_INSTRUMENTS } from '@sudobility/music_lib';
 
 beforeEach(() => {
   constructedInstances.length = 0;

@@ -27,7 +27,10 @@
       "import": "./dist/mocks/index.js"
     }
   },
-  "files": ["dist/**/*", "CLAUDE.md"],
+  "files": [
+    "dist/**/*",
+    "CLAUDE.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rimraf dist",
@@ -38,16 +41,22 @@
     "verify": "bun run typecheck && bun run lint && bun run test && bun run build",
     "prepublishOnly": "bun run clean && bun run verify"
   },
-  "keywords": ["scoresmith", "music", "platform", "react-native"],
+  "keywords": [
+    "scoresmith",
+    "music",
+    "platform",
+    "react-native"
+  ],
   "author": "Sudobility",
   "license": "BUSL-1.1",
   "dependencies": {},
   "peerDependencies": {
+    "@sudobility/music_lib": ">=0.11.0",
     "@sudobility/music_types": "^0.2.0",
     "@tonejs/midi": "^2.0.28",
     "fast-xml-parser": "",
     "react-native-audio-api": ">=0.13.0",
-    "tone": "^15.0.0"
+    "tone": "^15"
   },
   "peerDependenciesMeta": {
     "fast-xml-parser": {

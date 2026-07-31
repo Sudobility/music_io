@@ -1,7 +1,11 @@
+// @vitest-environment jsdom
+// The engine pauses playback on tab-hide, so its visibility tests need a
+// document. Annotated per file rather than globally, so the rn and mocks
+// suites keep proving they need no DOM.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Measure, NoteEvent, Score, Track } from '@sudobility/music_types';
-import { TempoMap } from '../../domain/time/tempo-map.js';
-import { twinkleScore, twoTrackScore } from '../../test/fixtures.js';
+import { TempoMap } from '@sudobility/music_lib';
+import { twinkleScore, twoTrackScore } from '@sudobility/music_lib';
 
 // A mocked `tone` module covering everything both tone-engine.ts and
 // instruments.ts touch: a singleton mock Transport whose schedule/
@@ -196,7 +200,7 @@ vi.mock('tone', () => {
 
 import * as Tone from 'tone';
 import { TonePlaybackEngine } from './tone-engine.js';
-import type { PlaybackObserver } from '../../services/playback/types.js';
+import type { PlaybackObserver } from '@sudobility/music_types';
 
 const PPQ = 480;
 const C_MAJOR = { fifths: 0, mode: 'major' as const };

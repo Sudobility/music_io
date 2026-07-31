@@ -46,16 +46,16 @@
  * amount of overhead for a simple, uniform correctness guarantee.
  */
 import * as Tone from 'tone';
-import { TempoMap } from '../../domain/time/tempo-map.js';
+import { TempoMap } from '@sudobility/music_lib';
 import type { Score } from '@sudobility/music_types';
-import type { ScoreRange } from '../../domain/selection/types.js';
+import type { ScoreRange } from '@sudobility/music_lib';
 import { createInstrument } from './instruments.js';
 import type { InstrumentHandle } from './instruments.js';
 import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
 import type { ScheduledNote } from './schedule.js';
 import { normalizeVelocity } from './midi.js';
-import { scoreEndTick } from '../../domain/score/queries.js';
-import type { PlaybackEngine, PlaybackObserver } from '../../services/playback/types.js';
+import { scoreEndTick } from '@sudobility/music_lib';
+import type { PlaybackEngine, PlaybackObserver } from '@sudobility/music_types';
 
 const BASE_BPM = 60;
 const POSITION_TICK_INTERVAL_SECONDS = 1 / 30;

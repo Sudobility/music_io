@@ -17,8 +17,8 @@
  */
 import * as Tone from 'tone';
 import { midiToHertz } from './midi.js';
-import { gmInstrument } from '../../domain/instruments/gm.js';
-import type { GmFamily } from '../../domain/instruments/gm.js';
+import { gmInstrument } from '@sudobility/music_lib';
+import type { GmFamily } from '@sudobility/music_lib';
 
 /**
  * The uniform shape `tone-engine.ts` schedules through, regardless of which

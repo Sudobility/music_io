@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Measure, NoteEvent, Score, Track } from '@sudobility/music_types';
-import { pitchToMidi } from '../../domain/pitch/pitch.js';
-import { twinkleScore, twoTrackScore } from '../../test/fixtures.js';
+import { pitchToMidi } from '@sudobility/music_lib';
+import { twinkleScore, twoTrackScore } from '@sudobility/music_lib';
 import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
 
 const PPQ = 480;
