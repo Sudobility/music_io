@@ -24,6 +24,10 @@ export default [
     },
     rules: {
       ...typescript.configs.recommended.rules,
+      // TypeScript already resolves every identifier, and it does so knowing
+      // about type-only names like `BlobPart` that eslint cannot see. Leaving
+      // no-undef on means a correct DOM type annotation fails lint.
+      'no-undef': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/explicit-function-return-type': 'off',
