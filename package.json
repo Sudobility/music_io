@@ -1,0 +1,14 @@
+{
+  "name": "music_io",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "react-native-audio-api": "^0.13.2",
+    "tone": "^15"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
