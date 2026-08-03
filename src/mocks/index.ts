@@ -69,6 +69,14 @@ export class MockPlaybackEngine implements PlaybackEngine {
     this.record(`setMasterVolume(${volume})`);
   }
 
+  noteOn(midi: number, program: number): void {
+    this.record(`noteOn(${midi},${program})`);
+  }
+
+  noteOff(midi: number): void {
+    this.record(`noteOff(${midi})`);
+  }
+
   setObserver(observer: PlaybackObserver | null): void {
     this.observer = observer;
     this.record('setObserver');

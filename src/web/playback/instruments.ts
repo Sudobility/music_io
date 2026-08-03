@@ -29,6 +29,17 @@ import type { GmFamily } from '@sudobility/music_lib';
  */
 export type InstrumentHandle = {
   triggerAttackRelease(midi: number, durationSeconds: number, time: number, velocity: number): void;
+  /**
+   * Sustained form, for auditioning a key that is being *held* — the player
+   * should hear the note for as long as the key is down, and its length is not
+   * known when it starts.
+   *
+   * Optional because not every voice has a meaningful sustain: a drum kit is
+   * struck, not held, so it leaves these out and the caller falls back to a
+   * short `triggerAttackRelease`.
+   */
+  triggerAttack?(midi: number, velocity: number): void;
+  triggerRelease?(midi: number): void;
   connect(node: Tone.ToneAudioNode): void;
   dispose(): void;
 };
@@ -139,12 +150,27 @@ export function resolveInstrumentCategory(nameOrProgram: string | number, isPerc
 /** The minimal shape every pitched Tone.js instrument used below satisfies. */
 type PitchedVoice = Tone.ToneAudioNode & {
   triggerAttackRelease(note: number, duration: number, time?: number, velocity?: number): unknown;
+  triggerAttack?(...args: never[]): unknown;
+  triggerRelease?(...args: never[]): unknown;
 };
 
 function wrapVoice(voice: PitchedVoice): InstrumentHandle {
   return {
     triggerAttackRelease(midi, durationSeconds, time, velocity) {
       voice.triggerAttackRelease(midiToHertz(midi), durationSeconds, time, velocity);
+    },
+    triggerAttack(midi, velocity) {
+      // Cast at the call: Tone's monophonic and polyphonic voices disagree on
+      // these signatures (one takes an optional note, the other a note or list),
+      // and both accept a single frequency at runtime.
+      (voice.triggerAttack as ((note: number, time?: number, velocity?: number) => unknown) | undefined)?.(
+        midiToHertz(midi),
+        undefined,
+        velocity,
+      );
+    },
+    triggerRelease(midi) {
+      (voice.triggerRelease as ((note: number) => unknown) | undefined)?.(midiToHertz(midi));
     },
     connect(node) {
       voice.connect(node);

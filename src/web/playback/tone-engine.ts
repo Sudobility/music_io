@@ -54,6 +54,11 @@ import type { InstrumentHandle } from './instruments.js';
 import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
 import type { ScheduledNote } from './schedule.js';
 import { normalizeVelocity } from './midi.js';
+
+/** Auditioned notes sound at a fixed mezzo-forte; a tap carries no velocity. */
+const AUDITION_VELOCITY = 0.8;
+/** How long a struck voice rings when auditioned, since it cannot be held. */
+const AUDITION_STRUCK_SECONDS = 0.4;
 import { scoreEndTick } from '@sudobility/music_lib';
 import type { PlaybackEngine, PlaybackObserver } from '@sudobility/music_types';
 
@@ -118,6 +123,51 @@ export class TonePlaybackEngine implements PlaybackEngine {
     this.ensureMasterGain();
     this.attachVisibilityHandler();
     this.initialized = true;
+  }
+
+  /**
+   * Voices used only for auditioning held keys, one per program.
+   *
+   * Deliberately not the track channels: a tapped key may belong to a track
+   * that is muted, soloed away or not even loaded, and borrowing a channel
+   * would also mean a `loadScore` mid-tap disposing the voice out from under a
+   * sounding note.
+   */
+  private auditionVoices = new Map<number, InstrumentHandle>();
+  /** Pitches currently held by `noteOn`, so `noteOff` knows which voice to release. */
+  private auditionHeld = new Map<number, InstrumentHandle>();
+
+  noteOn(midi: number, program: number): void {
+    // The audio context starts suspended until a gesture resumes it. A tap *is*
+    // that gesture, so start here rather than making the first tap silent.
+    void Tone.start();
+    this.ensureMasterGain();
+
+    let voice = this.auditionVoices.get(program);
+    if (!voice) {
+      voice = createInstrument(program, false);
+      if (this.masterGain) voice.connect(this.masterGain);
+      this.auditionVoices.set(program, voice);
+    }
+
+    // Retrigger cleanly if the same pitch is already held.
+    this.auditionHeld.get(midi)?.triggerRelease?.(midi);
+
+    if (voice.triggerAttack) {
+      voice.triggerAttack(midi, AUDITION_VELOCITY);
+      this.auditionHeld.set(midi, voice);
+    } else {
+      // A struck voice -- a drum kit -- has no sustain to hold, so it just
+      // sounds once and there is nothing for noteOff to release.
+      voice.triggerAttackRelease(midi, AUDITION_STRUCK_SECONDS, Tone.now(), AUDITION_VELOCITY);
+    }
+  }
+
+  noteOff(midi: number): void {
+    const voice = this.auditionHeld.get(midi);
+    if (!voice) return;
+    this.auditionHeld.delete(midi);
+    voice.triggerRelease?.(midi);
   }
 
   async loadScore(score: Score): Promise<void> {
@@ -229,6 +279,10 @@ export class TonePlaybackEngine implements PlaybackEngine {
       channel.gain.dispose();
     }
     this.channels.clear();
+
+    for (const voice of this.auditionVoices.values()) voice.dispose();
+    this.auditionVoices.clear();
+    this.auditionHeld.clear();
 
     this.metronomeSynth?.dispose();
     this.metronomeSynth = null;
@@ -393,10 +447,10 @@ export class TonePlaybackEngine implements PlaybackEngine {
         } catch (error) {
           console.error('TonePlaybackEngine: note trigger failed', note.noteId, error);
         }
-        this.noteOn(note.noteId);
+        this.markNoteActive(note.noteId);
       }, startSeconds);
       const offId = transport.schedule(() => {
-        this.noteOff(note.noteId);
+        this.markNoteInactive(note.noteId);
       }, endSeconds);
       this.noteEventIds.push(onId, offId);
     }
@@ -468,12 +522,13 @@ export class TonePlaybackEngine implements PlaybackEngine {
     transport.loop = true;
   }
 
-  private noteOn(noteId: string): void {
+  /** Bookkeeping only -- these track which ids are sounding, they do not make sound. */
+  private markNoteActive(noteId: string): void {
     this.activeNoteIds.add(noteId);
     this.observer?.onActiveNotes(Array.from(this.activeNoteIds));
   }
 
-  private noteOff(noteId: string): void {
+  private markNoteInactive(noteId: string): void {
     this.activeNoteIds.delete(noteId);
     this.observer?.onActiveNotes(Array.from(this.activeNoteIds));
   }

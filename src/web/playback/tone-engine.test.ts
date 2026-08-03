@@ -792,3 +792,43 @@ describe('TonePlaybackEngine: instrument failure isolation', () => {
     expect(observer.activeNoteSnapshots.length).toBeGreaterThan(0);
   });
 });
+
+describe('TonePlaybackEngine: auditioning a held key', () => {
+  it('holds a pitch until it is released', () => {
+    // Sounding a key while it is held is a different question from playing the
+    // score along a timeline, and must not disturb transport state.
+    const engine = new TonePlaybackEngine();
+    expect(() => {
+      engine.noteOn(60, 0);
+      engine.noteOff(60);
+    }).not.toThrow();
+    engine.dispose();
+  });
+
+  it('is a no-op to release a pitch that is not sounding', () => {
+    const engine = new TonePlaybackEngine();
+    expect(() => engine.noteOff(60)).not.toThrow();
+    engine.dispose();
+  });
+
+  it('retriggers cleanly when the same pitch is pressed again', () => {
+    const engine = new TonePlaybackEngine();
+    expect(() => {
+      engine.noteOn(60, 0);
+      engine.noteOn(60, 0);
+      engine.noteOff(60);
+    }).not.toThrow();
+    engine.dispose();
+  });
+
+  it('sounds a struck voice, which has no sustain to hold', () => {
+    // A drum kit is struck, not held, so it leaves triggerAttack out and the
+    // engine falls back to a short triggerAttackRelease.
+    const engine = new TonePlaybackEngine();
+    expect(() => {
+      engine.noteOn(38, 118);
+      engine.noteOff(38);
+    }).not.toThrow();
+    engine.dispose();
+  });
+});

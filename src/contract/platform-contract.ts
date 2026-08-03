@@ -72,6 +72,8 @@ export function runPlatformContract(name: string, createIo: () => MusicIo): void
         'setTrackSolo',
         'setMetronome',
         'setMasterVolume',
+        'noteOn',
+        'noteOff',
         'setObserver',
         'dispose',
       ]) {
