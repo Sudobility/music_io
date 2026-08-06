@@ -6,6 +6,10 @@ import { TonePlaybackEngine } from './playback/tone-engine.js';
 import { WebXmlParser } from './xml/xml.web.js';
 import { WebFileExporter } from './file/file.web.js';
 import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
+import { createWebAudioCodec } from './audio/web-audio-codec.js';
+import { renderOffline } from './audio/render.js';
+export { renderOffline } from './audio/render.js';
+export type { RenderEvent } from './audio/render.js';
 import type { MusicIo } from '../shared/types.js';
 
 export { TonePlaybackEngine, WebXmlParser, WebFileExporter, ToneJsMidiCodec };
@@ -20,6 +24,8 @@ export function createMusicIo(): MusicIo {
     playback: new TonePlaybackEngine(),
     xmlParser: new WebXmlParser(),
     midiCodec: new ToneJsMidiCodec(),
+    audioCodec: createWebAudioCodec(),
+    audioRenderer: { render: renderOffline },
     fileExporter: new WebFileExporter(),
   };
 }

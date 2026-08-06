@@ -7,6 +7,7 @@
  */
 import type { FileExporter, PlaybackEngine, PlaybackObserver, Score } from '@sudobility/music_types';
 import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
+import { createMockAudioCodec } from './audio-codec.js';
 import { MockXmlParser } from './xml.mock.js';
 import type { MusicIo } from '../shared/types.js';
 
@@ -106,6 +107,11 @@ export function createMusicIo(): MusicIo {
     // The real codec: MIDI encoding is pure byte manipulation, so faking it
     // would only weaken the tests that use it.
     midiCodec: new ToneJsMidiCodec(),
+    audioCodec: createMockAudioCodec(),
+    audioRenderer: {
+      // No audio context here; rendering is a browser capability.
+      render: () => Promise.reject(new Error('Offline audio rendering is not available on this platform')),
+    },
     fileExporter: new MockFileExporter(),
   };
 }

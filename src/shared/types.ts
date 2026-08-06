@@ -1,4 +1,11 @@
-import type { FileExporter, MidiCodec, PlaybackEngine, XmlParser } from '@sudobility/music_types';
+import type {
+  AudioCodec,
+  AudioRenderer,
+  FileExporter,
+  MidiCodec,
+  PlaybackEngine,
+  XmlParser,
+} from '@sudobility/music_types';
 
 /**
  * Everything a platform provides. Each entry point (`web`, `rn`, `mocks`)
@@ -9,5 +16,7 @@ export type MusicIo = {
   playback: PlaybackEngine;
   xmlParser: XmlParser;
   midiCodec: MidiCodec;
+  audioCodec: AudioCodec;
+  audioRenderer: AudioRenderer;
   fileExporter: FileExporter;
 };

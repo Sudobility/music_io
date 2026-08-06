@@ -1,6 +1,6 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.3.3",
+  "version": "0.6.1",
   "description": "Platform implementations for ScoreSmith: playback, XML parsing, file export and MIDI codecs, for web and React Native",
   "type": "module",
   "exports": {
@@ -49,10 +49,12 @@
   ],
   "author": "Sudobility",
   "license": "BUSL-1.1",
-  "dependencies": {},
+  "dependencies": {
+    "lamejs": "^1.2.1"
+  },
   "peerDependencies": {
-    "@sudobility/music_lib": "^1.4.2",
-    "@sudobility/music_types": "^0.8.1",
+    "@sudobility/music_lib": "^1.7.0",
+    "@sudobility/music_types": "^0.11.1",
     "@tonejs/midi": "^2.0.28",
     "fast-xml-parser": "",
     "react-native-audio-api": ">=0.13.0",
@@ -82,8 +84,8 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sudobility/music_lib": "^1.4.2",
-    "@sudobility/music_types": "^0.8.1",
+    "@sudobility/music_lib": "^1.7.0",
+    "@sudobility/music_types": "^0.11.1",
     "@tonejs/midi": "^2.0.28",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",

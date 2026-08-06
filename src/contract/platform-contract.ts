@@ -16,6 +16,7 @@ export function runPlatformContract(name: string, createIo: () => MusicIo): void
       expect(io.xmlParser).toBeDefined();
       expect(io.midiCodec).toBeDefined();
       expect(io.fileExporter).toBeDefined();
+      expect(io.audioCodec).toBeDefined();
     });
 
     it('parses XML and exposes the root element', () => {
@@ -80,5 +81,19 @@ export function runPlatformContract(name: string, createIo: () => MusicIo): void
         expect(typeof engine[method], method).toBe('function');
       }
     });
+    it('writes a real WAV file, not a bare buffer', () => {
+      const io = createIo();
+      const sampleRate = 44100;
+      const samples = new Float32Array(sampleRate / 10);
+      for (let i = 0; i < samples.length; i += 1) {
+        samples[i] = Math.sin((2 * Math.PI * 440 * i) / sampleRate);
+      }
+
+      const wav = io.audioCodec.encodeWav({ samples, sampleRate });
+      expect(new TextDecoder().decode(new Uint8Array(wav, 0, 4))).toBe('RIFF');
+      expect(new TextDecoder().decode(new Uint8Array(wav, 8, 4))).toBe('WAVE');
+      expect(wav.byteLength).toBe(44 + samples.length * 2);
+    });
+
   });
 }
