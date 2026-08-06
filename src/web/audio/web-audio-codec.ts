@@ -5,7 +5,11 @@
  * wav and mp3 — and therefore `.mpa`, which is the same MPEG audio — so nothing
  * has to bundle a decoder. Encoding mp3 does need one; wav does not.
  */
-import { Mp3Encoder } from 'lamejs';
+// @breezystack/lamejs, not lamejs: the original's published build leaves
+// MPEGMode undefined outside a browser global scope, so `new Mp3Encoder()`
+// throws `ReferenceError: MPEGMode is not defined`. The fork exists to fix
+// exactly that.
+import { Mp3Encoder } from '@breezystack/lamejs';
 import type { AudioCodec, DecodedAudio } from '@sudobility/music_types';
 import { encodeWav } from '../../shared/audio/wav.js';
 
