@@ -99,6 +99,14 @@ export class MockFileExporter implements FileExporter {
 }
 
 export { MockXmlParser };
+/**
+ * A hand-built ProTracker module, for downstream tests.
+ *
+ * Exported from `/mocks` — the test-facing entry — so the app's e2e can build
+ * a real module to import without a second builder that could drift from the
+ * reader this package ships.
+ */
+export { buildMod } from '../shared/mod/fixture.js';
 export type { MusicIo };
 
 export function createMusicIo(): MusicIo {

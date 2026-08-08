@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MusicIo } from '../shared/types.js';
-// The reader's own hand-built module, reused rather than duplicated: two
-// builders that drift is how a codec test starts passing against a shape the
-// real reader would reject.
-import { buildMod } from '../shared/mod/read.test.js';
+// The package's own hand-built module, so this cannot drift from the reader.
+import { buildMod } from '../shared/mod/fixture.js';
 
 /**
  * The one suite every platform implementation is held to.
