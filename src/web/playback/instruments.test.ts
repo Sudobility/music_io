@@ -190,9 +190,15 @@ describe('createInstrument: strings', () => {
 });
 
 describe('createInstrument: bass', () => {
-  it('builds a MonoSynth for a bass GM program', () => {
+  it('builds a PolySynth of MonoSynth voices for a bass GM program', () => {
+    // This used to assert a bare MonoSynth, pinning the defect in place: one
+    // voice meant a second simultaneous bass note threw inside Tone and was
+    // never heard. The MonoSynth timbre is what bass wants; the single voice
+    // was not.
     createInstrument(33, false); // Electric Bass (finger)
-    expect(instancesOfType('MonoSynth')).toHaveLength(1);
+    expect(instancesOfType('MonoSynth')).toHaveLength(0);
+    const [poly] = instancesOfType('PolySynth');
+    expect((poly.options as { voice: { name: string } }).voice.name).toBe('MonoSynth');
   });
 });
 
@@ -387,5 +393,39 @@ describe('per-family synth voices', () => {
 
   it('still lets a percussion clef win over any program', () => {
     expect(resolveInstrumentCategory(56, true)).toBe('drum-kit');
+  });
+});
+
+describe('every pitched instrument is polyphonic', () => {
+  // The bug this pins: the bass was a bare `Tone.MonoSynth`. A MonoSynth has
+  // one voice, so a second note starting at the same tick — a chord, an octave
+  // double, two parts landing together — made Tone throw "Start time must be
+  // strictly greater than previous start time" and that note never sounded.
+  // Checked across all 128 GM programs rather than for the bass alone, because
+  // the defect is a whole class: any voice not wrapped in a PolySynth has it.
+  const MONOPHONIC = ['Synth', 'AMSynth', 'FMSynth', 'MonoSynth'];
+
+  it('constructs no standalone monophonic voice for any GM program', () => {
+    const offenders: string[] = [];
+    for (let program = 0; program < 128; program++) {
+      constructedInstances.length = 0;
+      createInstrument(program, false);
+      for (const type of MONOPHONIC) {
+        if (instancesOfType(type).length > 0) {
+          offenders.push(`program ${program} (${GM_INSTRUMENTS[program].name}) -> bare ${type}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('builds the bass as a PolySynth of MonoSynth voices, keeping the timbre', () => {
+    // Bass specifically, since that is what shipped broken: the fix must be
+    // polyphony, not a switch to some other-sounding synth.
+    constructedInstances.length = 0;
+    createInstrument('Electric Bass', false);
+    const [poly] = instancesOfType('PolySynth');
+    expect(poly).toBeDefined();
+    expect((poly.options as { voice: { name: string } }).voice.name).toBe('MonoSynth');
   });
 });

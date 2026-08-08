@@ -229,11 +229,21 @@ function createStringsInstrument(): InstrumentHandle {
   );
 }
 
-// ---- bass (MonoSynth) --------------------------------------------------------
+// ---- bass (PolySynth of MonoSynth voices) -----------------------------------
 
+/**
+ * `PolySynth(MonoSynth)`, not a bare `MonoSynth` — the same shape brass uses.
+ *
+ * A bare MonoSynth has one voice, so a second note starting at the same tick
+ * (a chord, an octave double, two voices landing together) made Tone throw
+ * "Start time must be strictly greater than previous start time" and the note
+ * simply never sounded. Every other pitched instrument here was already
+ * polyphonic; bass was the one that was not, which made bass-heavy
+ * arrangements play back with holes in them.
+ */
 function createBassInstrument(): InstrumentHandle {
   return wrapVoice(
-    new Tone.MonoSynth({
+    new Tone.PolySynth(Tone.MonoSynth, {
       oscillator: { type: 'sawtooth' },
       envelope: { attack: 0.01, decay: 0.2, sustain: 0.6, release: 0.3 },
       filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.4, baseFrequency: 80, octaves: 2.5 },
