@@ -2,25 +2,11 @@
  * Reading a ProTracker module into plain data.
  *
  * Deliberately stops at "what the file says" — no musical interpretation here,
- * so the byte handling can be tested against a hand-built buffer with no score
- * model in the way.
- */
-/**
- * Reading a ProTracker module into plain data.
- *
- * Deliberately stops at "what the file says" — no musical interpretation here,
  * so the byte handling can be tested against a hand-built buffer without any
  * score model in the way.
  */
-export type ModSample = { index: number; name: string };
-export type ModCell = { sample: number; period: number; effect: number; param: number };
-export type ModFile = {
-  title: string;
-  channels: number;
-  samples: ModSample[];
-  order: number[];
-  patterns: ModCell[][][];
-};
+
+import type { ModCell, ModFile, ModSample } from '@sudobility/music_types';
 
 const HEADER_BYTES = 1084;
 const ROWS_PER_PATTERN = 64;

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { MusicIo } from '../shared/types.js';
+// The reader's own hand-built module, reused rather than duplicated: two
+// builders that drift is how a codec test starts passing against a shape the
+// real reader would reject.
+import { buildMod } from '../shared/mod/read.test.js';
 
 /**
  * The one suite every platform implementation is held to.
@@ -10,13 +14,29 @@ import type { MusicIo } from '../shared/types.js';
  */
 export function runPlatformContract(name: string, createIo: () => MusicIo): void {
   describe(`${name}: platform contract`, () => {
-    it('provides all four services', () => {
+    it('provides every service', () => {
       const io = createIo();
       expect(io.playback).toBeDefined();
       expect(io.xmlParser).toBeDefined();
       expect(io.midiCodec).toBeDefined();
       expect(io.fileExporter).toBeDefined();
       expect(io.audioCodec).toBeDefined();
+      expect(io.modCodec).toBeDefined();
+    });
+
+    it('rejects bytes that are not a module', () => {
+      // A garbage score is worse than a clear failure: it looks like the file
+      // imported and quietly is not the music.
+      expect(() => createIo().modCodec.decode(new ArrayBuffer(64))).toThrow();
+    });
+
+    it('decodes a module to its patterns and order, leaving pitch to music_lib', () => {
+      const io = createIo();
+      const file = io.modCodec.decode(buildMod({}));
+      expect(file.channels).toBe(4);
+      expect(file.order).toEqual([0]);
+      expect(file.patterns).toHaveLength(1);
+      expect(file.patterns[0]).toHaveLength(64);
     });
 
     it('parses XML and exposes the root element', () => {

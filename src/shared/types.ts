@@ -3,6 +3,7 @@ import type {
   AudioRenderer,
   FileExporter,
   MidiCodec,
+  ModCodec,
   PlaybackEngine,
   XmlParser,
 } from '@sudobility/music_types';
@@ -16,6 +17,7 @@ export type MusicIo = {
   playback: PlaybackEngine;
   xmlParser: XmlParser;
   midiCodec: MidiCodec;
+  modCodec: ModCodec;
   audioCodec: AudioCodec;
   audioRenderer: AudioRenderer;
   fileExporter: FileExporter;
