@@ -31,7 +31,12 @@ export default [
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/explicit-function-return-type': 'off',
-      '@typescript-eslint/no-non-null-assertion': 'warn',
+      /**
+       * Off, not 'warn' — same call as music_lib and music_api. The codebase
+       * uses `!` deliberately after invariants the compiler cannot see, and as
+       * a warning it only buries the warnings worth reading.
+       */
+      '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-empty-object-type': 'off',
     },
   },
