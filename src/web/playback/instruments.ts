@@ -69,6 +69,85 @@ export type InstrumentCategory =
   | 'percussive'
   | 'drum-kit';
 
+// ---- output levels ---------------------------------------------------------
+
+/**
+ * Amplitude trim, in dB, for a voice that sums `count` detuned copies of one
+ * oscillator (Tone's `fatsawtooth`/`fatsine`).
+ *
+ * Straight arithmetic, not taste: three oscillators at the same amplitude sum
+ * to roughly three times one of them, so the voice needs dividing by three to
+ * sit alongside a single-oscillator voice.
+ */
+function unisonTrimDb(count: number): number {
+  return -20 * Math.log10(count);
+}
+
+/**
+ * A square wave's RMS is 1.0 against a sine's 0.707, so it arrives ~3dB hot.
+ *
+ * This is the one waveform difference corrected here, because it is the one
+ * that follows from arithmetic. Sawtooth reads louder than sine to the ear
+ * despite a *lower* RMS — its energy is spread over harmonics the ear is more
+ * sensitive to — but putting a number on that is a perceptual judgement, not a
+ * calculation, so it is deliberately left alone rather than guessed at.
+ */
+const SQUARE_TRIM_DB = -20 * Math.log10(1 / Math.SQRT1_2);
+
+/**
+ * Per-family output trim.
+ *
+ * Every voice used to run at unity, which is why a track could overpower the
+ * rest of the mix however its MIDI volume and velocities were set: an
+ * `ensemble` patch is three detuned sawtooths and a `pipe` patch is one sine,
+ * and nothing reconciled them. A `Record` over the category union rather than a
+ * partial map, so adding an instrument family cannot silently ship untrimmed.
+ */
+const OUTPUT_TRIM_DB: Record<InstrumentCategory, number> = {
+  piano: 0, // Sampler, or a single-triangle fallback
+  'electric-piano': 0, // FM, single carrier
+  'chromatic-percussion': 0, // FM sine
+  organ: unisonTrimDb(3), // fatsine, count 3
+  plucked: 0, // sawtooth
+  bass: 0, // sawtooth
+  strings: 0, // sawtooth
+  ensemble: unisonTrimDb(3), // fatsawtooth, count 3
+  brass: 0, // sawtooth
+  reed: SQUARE_TRIM_DB, // square
+  pipe: 0, // sine
+  'synth-lead': SQUARE_TRIM_DB, // square
+  'synth-pad': unisonTrimDb(3), // fatsine, count 3
+  'synth-effects': 0, // AM sine
+  percussive: 0, // membrane
+  'drum-kit': 0, // membrane + noise
+};
+
+/** dB to linear gain, computed here rather than via `Tone.dbToGain` so the conversion is testable against a mocked Tone. */
+function dbToGain(db: number): number {
+  return Math.pow(10, db / 20);
+}
+
+/**
+ * Routes `handle` through a fixed gain so families sit at comparable levels.
+ * A zero trim is passed through untouched, so no extra node is created for the
+ * families that need none.
+ */
+function withOutputTrim(handle: InstrumentHandle, db: number): InstrumentHandle {
+  if (db === 0) return handle;
+  const trim = new Tone.Gain(dbToGain(db));
+  return {
+    ...handle,
+    connect(node: Tone.InputNode) {
+      handle.connect(trim);
+      trim.connect(node);
+    },
+    dispose() {
+      handle.dispose();
+      trim.dispose();
+    },
+  };
+}
+
 // ---- category resolution ---------------------------------------------------
 
 const NAME_CATEGORY_PATTERNS: Array<[RegExp, InstrumentCategory]> = [
@@ -477,6 +556,10 @@ function createDrumKitInstrument(): InstrumentHandle {
  */
 export function createInstrument(nameOrProgram: string | number, isPercussion: boolean): InstrumentHandle {
   const category = resolveInstrumentCategory(nameOrProgram, isPercussion);
+  return withOutputTrim(createForCategory(category), OUTPUT_TRIM_DB[category]);
+}
+
+function createForCategory(category: InstrumentCategory): InstrumentHandle {
   switch (category) {
     case 'piano':
       return createPianoInstrument();

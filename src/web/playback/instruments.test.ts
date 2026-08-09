@@ -429,3 +429,43 @@ describe('every pitched instrument is polyphonic', () => {
     expect((poly.options as { voice: { name: string } }).voice.name).toBe('MonoSynth');
   });
 });
+
+describe('instrument output levels', () => {
+  /** The linear gain of the trim node `createInstrument` inserted, or 1 when it inserted none. */
+  function trimGain(nameOrProgram: string | number, isPercussion = false): number {
+    constructedInstances.length = 0;
+    createInstrument(nameOrProgram, isPercussion);
+    const gains = instancesOfType('Gain');
+    // The drum kit builds its own internal Gain(1) mixer; the trim is the last.
+    const trim = gains.at(-1);
+    return trim ? (trim.options as { value: number }).value : 1;
+  }
+
+  it('divides a three-oscillator unison voice by three so it does not bury the mix', () => {
+    // `fatsawtooth`/`fatsine` with count 3 sum three detuned copies, arriving
+    // ~9.5dB hotter than any single-oscillator voice. Nothing reconciled that,
+    // which is how one track came to overpower the others regardless of its
+    // MIDI volume.
+    expect(trimGain('String Ensemble 1')).toBeCloseTo(1 / 3, 4);
+    expect(trimGain('Church Organ')).toBeCloseTo(1 / 3, 4);
+    expect(trimGain('Pad 1 (new age)')).toBeCloseTo(1 / 3, 4);
+  });
+
+  it('brings a square-wave voice down to a sine wave RMS', () => {
+    // Square RMS 1.0 against sine's 0.707 -> about -3dB.
+    expect(trimGain('Lead 1 (square)')).toBeCloseTo(Math.SQRT1_2, 4);
+  });
+
+  it('leaves a single-oscillator voice untouched, adding no node for it', () => {
+    expect(trimGain('Flute')).toBe(1);
+    expect(trimGain('Acoustic Bass')).toBe(1);
+  });
+
+  it('covers every category, so a new family cannot ship untrimmed', () => {
+    // The Record type enforces this at compile time; asserted here too because
+    // a wrong *value* is silent, and every program must resolve to an entry.
+    for (let program = 0; program < 128; program++) {
+      expect(Number.isFinite(trimGain(program))).toBe(true);
+    }
+  });
+});

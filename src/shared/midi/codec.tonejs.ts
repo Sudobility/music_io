@@ -2,6 +2,7 @@ import * as midiModule from '@tonejs/midi';
 import type { MidiCodec, MidiControlChange, MidiFile, MidiTrackData } from '@sudobility/music_types';
 
 type MidiConstructor = typeof import('@tonejs/midi').Midi;
+type ToneMidiTrack = InstanceType<MidiConstructor>['tracks'][number];
 
 /**
  * `@tonejs/midi` publishes CommonJS as `main` and ESM only via `module`, with
@@ -21,6 +22,52 @@ function missingMidi(): never {
   throw new Error('@tonejs/midi did not export Midi under any known module shape.');
 }
 
+function controlChangesFor(track: ToneMidiTrack): MidiTrackData['controlChanges'] {
+  return Object.fromEntries(
+    Object.entries(track.controlChanges).map(([number, events]) => [
+      Number(number),
+      (events ?? []).map(
+        (cc): MidiControlChange => ({ number: cc.number, ticks: cc.ticks, value: cc.value }),
+      ),
+    ]),
+  );
+}
+
+function isTickZeroSetupTrack(track: MidiTrackData): boolean {
+  return (
+    track.notes.length === 0 &&
+    track.durationTicks === 0 &&
+    Object.values(track.controlChanges).some((events) => events.some((event) => event.ticks === 0))
+  );
+}
+
+/**
+ * Format-0 files sometimes decode through `@tonejs/midi` as alternating
+ * control-only setup tracks and note tracks. The setup track has the CC7/CC10
+ * values from the original channel, while the following note track has the
+ * program/channel but no controllers. Copy those tick-0 controllers forward so
+ * import/playback keeps the source mix.
+ */
+function withFormatZeroSetupControls(tracks: MidiTrackData[]): MidiTrackData[] {
+  return tracks.map((track, index) => {
+    if (track.notes.length === 0) return track;
+
+    const previous = tracks[index - 1];
+    if (!previous || !isTickZeroSetupTrack(previous)) return track;
+
+    const controlChanges = { ...track.controlChanges };
+    let changed = false;
+    for (const [number, events] of Object.entries(previous.controlChanges)) {
+      const ccNumber = Number(number);
+      if (controlChanges[ccNumber]?.length) continue;
+      controlChanges[ccNumber] = events;
+      changed = true;
+    }
+
+    return changed ? { ...track, controlChanges } : track;
+  });
+}
+
 /**
  * `@tonejs/midi` behind the neutral model.
  *
@@ -34,6 +81,26 @@ function missingMidi(): never {
 export class ToneJsMidiCodec implements MidiCodec {
   decode(data: ArrayBuffer): MidiFile {
     const midi = new Midi(data);
+    const tracks = midi.tracks.map(
+      (track): MidiTrackData => ({
+        name: track.name,
+        channel: track.channel,
+        instrument: { number: track.instrument.number, name: track.instrument.name },
+        notes: track.notes.map((note) => ({
+          midi: note.midi,
+          ticks: note.ticks,
+          durationTicks: note.durationTicks,
+          velocity: note.velocity,
+        })),
+        // Kept keyed by CC number: the importer looks up sustain (64),
+        // volume (7) and pan (10) directly, and flattening them here would
+        // lose volume and pan silently.
+        controlChanges: controlChangesFor(track),
+        durationTicks: track.durationTicks,
+        durationSeconds: track.duration,
+      }),
+    );
+
     return {
       header: {
         ppq: midi.header.ppq,
@@ -44,32 +111,7 @@ export class ToneJsMidiCodec implements MidiCodec {
           timeSignature: [signature.timeSignature[0], signature.timeSignature[1]] as [number, number],
         })),
       },
-      tracks: midi.tracks.map(
-        (track): MidiTrackData => ({
-          name: track.name,
-          channel: track.channel,
-          instrument: { number: track.instrument.number, name: track.instrument.name },
-          notes: track.notes.map((note) => ({
-            midi: note.midi,
-            ticks: note.ticks,
-            durationTicks: note.durationTicks,
-            velocity: note.velocity,
-          })),
-          // Kept keyed by CC number: the importer looks up sustain (64),
-          // volume (7) and pan (10) directly, and flattening them here would
-          // lose volume and pan silently.
-          controlChanges: Object.fromEntries(
-            Object.entries(track.controlChanges).map(([number, events]) => [
-              Number(number),
-              (events ?? []).map(
-                (cc): MidiControlChange => ({ number: cc.number, ticks: cc.ticks, value: cc.value }),
-              ),
-            ]),
-          ),
-          durationTicks: track.durationTicks,
-          durationSeconds: track.duration,
-        }),
-      ),
+      tracks: withFormatZeroSetupControls(tracks),
       duration: midi.duration,
     };
   }
