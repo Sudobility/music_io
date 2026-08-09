@@ -94,7 +94,7 @@ vi.mock('tone', () => {
       record('Gain', { value }, this);
     }
   }
-  return { Synth, AMSynth, FMSynth, MonoSynth, MembraneSynth, NoiseSynth, Sampler, PolySynth, Filter, Gain, now: () => clock.now };
+  return { Synth, AMSynth, FMSynth, MonoSynth, MembraneSynth, NoiseSynth, Sampler, PolySynth, Filter, Gain, now: () => clock.now, getContext: () => ({ currentTime: clock.now }) };
 });
 
 import * as Tone from 'tone';
@@ -459,10 +459,13 @@ describe('createInstrument: drum kit mono-voice retrigger guard', () => {
     expect(t1).toBe(1);
     expect(t2).toBeGreaterThan(t1);
 
-    // An out-of-order retrigger (earlier time after a later one) also stays monotonic.
+    // A hit that arrives far out of order is NOT dragged forward to stay
+    // monotonic: that is the state the runaway guard exists to escape, so the
+    // voice snaps back to the written time and accepts that Tone may reject
+    // this one hit. One dropped note beats a track that mutes itself.
     handle.triggerAttackRelease(42, 0.05, 0.5, 0.9);
     const t3 = hat.triggerAttackRelease.mock.calls[2][1] as number;
-    expect(t3).toBeGreaterThan(t2);
+    expect(t3).toBe(0.5);
   });
 
   it('stays monotonic when the scheduled time has already passed', () => {
@@ -482,6 +485,42 @@ describe('createInstrument: drum kit mono-voice retrigger guard', () => {
     const t2 = hat.triggerAttackRelease.mock.calls[1][1] as number;
     expect(t1).toBeGreaterThanOrEqual(5);
     expect(t2).toBeGreaterThan(t1);
+  });
+
+  it('does not drift ahead of the clock over a long dense passage', () => {
+    // The regression this pins, which muted whole tracks partway through a
+    // complex arrangement: the guard used to floor at `Tone.now()`, which is
+    // `currentTime + lookAhead` and therefore *ahead* of a punctual hit. Every
+    // hit then looked like a collision, every one took another epsilon, and
+    // `last` outran the clock — so hits were scheduled further and further into
+    // the future until the voice fell silent. Pause/play appeared to fix it
+    // only because rebuilding the channels made a fresh guard.
+    const handle = createInstrument('Drums', true);
+    const [, hat] = instancesOfType('NoiseSynth').map((c) => c.instance);
+
+    // A punctual stream: every hit is written in the future, as the Transport
+    // schedules them. None of them should be moved at all.
+    for (let i = 0; i < 200; i++) {
+      clock.now = i * 0.05; // the clock advances with playback
+      handle.triggerAttackRelease(42, 0.05, i * 0.05 + 0.02, 0.9);
+    }
+    const times = hat.triggerAttackRelease.mock.calls.map((c) => c[1] as number);
+    for (let i = 0; i < times.length; i++) {
+      expect(times[i]).toBeCloseTo(i * 0.05 + 0.02, 6);
+    }
+  });
+
+  it('bounds the nudge when a whole batch does collide, instead of compounding', () => {
+    // Even in the worst case — a pile of hits on one voice at one instant — the
+    // guard may never push a hit arbitrarily far out, or it recreates the
+    // runaway one epsilon at a time.
+    const handle = createInstrument('Drums', true);
+    const [, hat] = instancesOfType('NoiseSynth').map((c) => c.instance);
+
+    for (let i = 0; i < 200; i++) handle.triggerAttackRelease(42, 0.05, 1, 0.9);
+
+    const times = hat.triggerAttackRelease.mock.calls.map((c) => c[1] as number);
+    for (const t of times) expect(t).toBeLessThanOrEqual(1 + 0.025 + 1e-9);
   });
 
   it('keeps distinct voices independent: a kick at the same time as a hat is not nudged', () => {

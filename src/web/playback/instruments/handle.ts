@@ -69,28 +69,58 @@ export function wrapVoice(voice: PitchedVoice): InstrumentHandle {
 const MONO_RETRIGGER_EPSILON_SECONDS = 0.001;
 
 /**
+ * How far a hit may ever be nudged past the time it was written for.
+ *
+ * A hard bound, not a tuning knob: without one the nudges compound, and a voice
+ * that falls far enough behind schedules its hits past the end of playback and
+ * goes silent. Past this, the guard gives up and uses the written time — the
+ * worst case is then one dropped note (Tone throws, the engine catches and logs
+ * it), which is vastly better than a track that mutes itself. 25ms is about
+ * where a late percussion hit stops being a flam and starts being wrong.
+ */
+const MAX_NUDGE_SECONDS = 0.025;
+
+/**
  * Per-voice start-time monotonizer. Tone's single-source instruments
- * (`NoiseSynth`'s underlying `Noise`) assert that each `start(time)` is
- * STRICTLY greater than the previous one — but a real percussion track
- * routinely lands two hits on the same voice at the same tick (e.g. a closed
- * and a pedal hi-hat landing together, both on the closed-hat voice).
- * Untreated, the second `triggerAttackRelease` threw inside the Transport
- * callback, and that exception aborted the rest of the audio tick's event
- * batch — starving the position ticker (frozen caret) mid-playback.
- * Nudging a colliding (or out-of-order) hit forward by half a millisecond
- * keeps the source legal and is inaudible.
+ * (`NoiseSynth`'s underlying `Noise`, `MembraneSynth`'s oscillator) assert that
+ * each `start(time)` is STRICTLY greater than the previous one — but a real
+ * percussion track routinely lands two hits on the same voice at the same tick
+ * (a closed and a pedal hi-hat landing together, say). Untreated, the second
+ * `triggerAttackRelease` threw inside the Transport callback, and that
+ * exception aborted the rest of that audio tick's events — including the
+ * position ticker, which froze the caret mid-playback.
+ *
+ * Two things this must NOT do, both learned the hard way:
+ *
+ * Do not measure "already passed" with `Tone.now()`. That is
+ * `currentTime + lookAhead`, and a Transport callback's `time` falls *inside*
+ * the lookahead window — so `now()` is routinely *ahead* of a perfectly
+ * punctual hit. Flooring at it pushed every hit up to a lookahead late, and
+ * because a batch of events fired together all read the same `now()`, every one
+ * of them collided and took another epsilon. `last` then ran ahead of the clock
+ * faster than the clock advanced, hits were scheduled further and further out,
+ * and the voice went silent until something rebuilt it. `currentTime` is the
+ * real "has this moment passed" threshold.
+ *
+ * Do not let the nudge compound without limit — see `MAX_NUDGE_SECONDS`.
  */
 export function monotonicTime(): (time: number) => number {
   let last = Number.NEGATIVE_INFINITY;
   return (time) => {
-    // Floor at `now` before comparing. Tone clamps a start time that has
-    // already passed up to the current time, so a batch of events firing late
-    // together — which is what happens whenever the main thread stalls briefly
-    // — all collapse onto the same instant however far apart their nominal
-    // times were. Tracking the nominal times alone therefore let collisions
-    // through the guard and the assertion still fired.
-    const earliest = Math.max(time, Tone.now());
-    const t = earliest <= last ? last + MONO_RETRIGGER_EPSILON_SECONDS : earliest;
+    let currentTime = Number.NEGATIVE_INFINITY;
+    try {
+      currentTime = Tone.getContext().currentTime;
+    } catch {
+      // No clock (the test mock): the written time is the only truth available.
+    }
+    const earliest = Math.max(time, currentTime);
+    const nudged = last + MONO_RETRIGGER_EPSILON_SECONDS;
+    // Measured against `earliest`, not the written time: a batch that is
+    // genuinely overdue is legitimately clamped to now, and must still be
+    // allowed to nudge. What the cap catches is `last` having run *ahead* of
+    // the real schedule — the runaway — and there it resets to `earliest`,
+    // snapping the voice back to the clock.
+    const t = earliest <= last && nudged - earliest <= MAX_NUDGE_SECONDS ? nudged : earliest;
     last = t;
     return t;
   };
