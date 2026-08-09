@@ -52,20 +52,43 @@ the *font* to tens of megabytes instead of hundreds.
 
 ## Open, and needed before implementation
 
-**Percussion on channel 9 rendered silence.** `midiProgramSelect(9, sfontId,
-128, 0)` followed by note-ons on 36/38/42/49 produced peak 0.0000, while pitched
-channels worked. Almost certainly wrong invocation rather than a missing
-capability — fluidsynth plainly supports GM percussion — but the correct
-selection (bank offset, `midiBankSelect`, or the channel-10 convention) must be
-established before the design's drum path can be trusted. This is the first
-thing to settle.
+### RESOLVED — percussion: do not select a program on channel 9
 
-**Polyphony is not on the worklet API.** The instance exposes
-`setInterpolation`, `setGain`, `loadSFont`, `midiProgramSelect` and friends —
-but no polyphony setter. The setting name `synth.polyphony` exists inside the
-library, so it is presumably reachable at construction; the route needs finding.
-This matters because the design's degradation ladder uses polyphony as its
-second rung. Interpolation, the first rung, is confirmed working.
+Five routes were measured. Only one sounds:
+
+| Route | Peak |
+| --- | --- |
+| **ch9, no program select at all** | **0.3120** |
+| ch9, `midiProgramSelect(9, sfontId, 128, 0)` | 0.0000 |
+| ch9, `CC0=1` + `midiProgramChange(9, 0)` | 0.0000 |
+| ch9, single note after bank-128 select | 0.0000 |
+| ch0 with bank-128 preset 0 | 0.0000 |
+
+The font's bank offset is 0. FluidSynth's GM mode already maps channel 9 to the
+percussion bank, and the explicit select was what *silenced* it — it replaced a
+working default with a preset that does not exist at that address.
+
+**Rule for the implementation: leave channel 9 at its default. Never call
+`midiProgramSelect` on a percussion channel.**
+
+The member probe also turned up `midiSetChannelType` / `setChannelType`, which
+marks an arbitrary channel as a drum channel. That is what lets a score carry
+more than one percussion track: extra drum tracks take an ordinary channel and
+are switched to drum type, rather than each needing its own synth instance for
+its own channel 9. It simplifies `ChannelAllocator` — verify it before relying
+on it.
+
+### RESOLVED — polyphony is not reachable, and does not need to be
+
+The full member list carries no polyphony setter. The escape hatches
+(`_getRawSynthesizer`, `callFunction`) exist but are private.
+
+This does not block the design. FluidSynth already steals voices at its default
+polyphony, which is the behaviour the ladder's second rung was asking for — it
+happens automatically rather than needing a cap. So the ladder becomes:
+interpolation order (confirmed working, halves render time), then fluidsynth's
+own stealing. An explicit cap is deferred until measurement shows it is needed,
+and would go through the raw-synthesizer hatch.
 
 **Load time is not free.** ~4.7s to decode 23MB of SF3, on top of the download.
 With playback blocked until ready, first run is download + ~5s. Caching the
@@ -96,7 +119,9 @@ spike needs rerunning against it.
 
 ## Verdict
 
-The technical assumption holds, with room to spare. Two configuration questions
-(percussion selection, polyphony route) need answering before implementation,
-and both look like invocation details rather than capability gaps. The licence
-question is the one that could stop the design, and it needs a human decision.
+The technical assumption holds, with room to spare. Both configuration questions are answered above: percussion works by leaving
+channel 9 alone, and polyphony needs no setter because fluidsynth already
+steals. Nothing technical blocks implementation.
+
+The licence question remains, and the project owner has chosen to proceed and
+revisit it later. The terms are recorded here so that decision stays visible.
