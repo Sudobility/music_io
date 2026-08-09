@@ -97,6 +97,7 @@
   },
   "type": "module",
   "dependencies": {
-    "@breezystack/lamejs": "^1.2.7"
+    "@breezystack/lamejs": "^1.2.7",
+    "js-synthesizer": "^1.13.0"
   }
 }
