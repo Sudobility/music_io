@@ -49,7 +49,8 @@ import * as Tone from 'tone';
 import { TempoMap } from '@sudobility/music_lib';
 import type { Score } from '@sudobility/music_types';
 import type { ScoreRange } from '@sudobility/music_lib';
-import { createInstrument } from './instruments.js';
+import { createInstrument, voiceSourceFor } from './instruments.js';
+import { headroomTrimFor, LIMITER_CEILING_DB } from './mix.js';
 import type { InstrumentHandle } from './instruments.js';
 import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
 import type { ScheduledNote } from './schedule.js';
@@ -94,6 +95,7 @@ export class TonePlaybackEngine implements PlaybackEngine {
   private masterVolume = 1;
 
   private masterGain: Tone.Gain | null = null;
+  private masterLimiter: Tone.Limiter | null = null;
   private metronomeSynth: Tone.Synth | null = null;
   /** Ids of the schedule()/scheduleRepeat() calls that make up note playback + the position ticker; all cleared/rebuilt together (`scheduleAll`). */
   private noteEventIds: number[] = [];
@@ -258,7 +260,7 @@ export class TonePlaybackEngine implements PlaybackEngine {
 
   setMasterVolume(volume: number): void {
     this.masterVolume = volume;
-    if (this.masterGain) this.masterGain.gain.value = volume;
+    this.applyMasterGain();
   }
 
   setObserver(observer: PlaybackObserver | null): void {
@@ -288,6 +290,8 @@ export class TonePlaybackEngine implements PlaybackEngine {
     this.metronomeSynth = null;
     this.masterGain?.dispose();
     this.masterGain = null;
+    this.masterLimiter?.dispose();
+    this.masterLimiter = null;
 
     if (this.visibilityHandler && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.visibilityHandler);
@@ -322,9 +326,17 @@ export class TonePlaybackEngine implements PlaybackEngine {
 
   private ensureMasterGain(): Tone.Gain {
     if (!this.masterGain) {
-      this.masterGain = new Tone.Gain(this.masterVolume).toDestination();
+      this.masterLimiter = new Tone.Limiter(LIMITER_CEILING_DB).toDestination();
+      this.masterGain = new Tone.Gain(this.masterVolume);
+      this.masterGain.connect(this.masterLimiter);
+      this.applyMasterGain();
     }
     return this.masterGain;
+  }
+
+  /** The user's master volume with the track-count headroom folded underneath it. */
+  private applyMasterGain(): void {
+    if (this.masterGain) this.masterGain.gain.value = this.masterVolume * headroomTrimFor(this.channels.size);
   }
 
   private attachVisibilityHandler(): void {
@@ -390,7 +402,7 @@ export class TonePlaybackEngine implements PlaybackEngine {
     const master = this.ensureMasterGain();
     for (const track of this.score.tracks) {
       const runtime = !reseedFromScore ? previous.get(track.id) : undefined;
-      const instrument = createInstrument(track.instrumentName || track.midiProgram, track.clef === 'percussion');
+      const instrument = createInstrument(voiceSourceFor(track), track.clef === 'percussion');
       const panner = new Tone.Panner(track.pan);
       const gain = new Tone.Gain(1);
       instrument.connect(panner);
@@ -406,6 +418,8 @@ export class TonePlaybackEngine implements PlaybackEngine {
         volume: runtime?.volume ?? track.volume,
       });
     }
+    // After the channels exist, so the trim sees the new track count.
+    this.applyMasterGain();
     this.applyChannelGains();
   }
 

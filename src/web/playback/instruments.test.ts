@@ -114,6 +114,37 @@ describe('resolveInstrumentCategory', () => {
     expect(resolveInstrumentCategory(0, true)).toBe('drum-kit');
   });
 
+  it('reads the pitched Percussive family correctly by program, where the name lies', () => {
+    // GM 112-119 is the Percussive family: pitched instruments played on an
+    // ordinary melodic channel. Three of them are named after drums, and the
+    // name is what misled callers into handing them the unpitched kit — which
+    // is why `tone-engine` resolves a track from its program and not its name.
+    // Asserted as a pair so the trap itself stays documented rather than
+    // looking like an arbitrary preference.
+    for (const program of [114, 116, 118]) {
+      expect(resolveInstrumentCategory(program, false)).toBe('percussive');
+      expect(resolveInstrumentCategory(GM_INSTRUMENTS[program].name, false)).toBe('drum-kit');
+    }
+  });
+
+  it('gives a driven guitar a sustaining voice, unlike a plucked one', () => {
+    // Overdriven (29) and Distortion (30) sit in the GM guitar family but do
+    // not behave like a plucked string: a driven amp keeps feeding the note.
+    // On the plucked voice, whose sustain is 0, a two-second note died after
+    // 0.56s, so held guitar lines played back chopped short.
+    expect(resolveInstrumentCategory(29, false)).toBe('guitar-driven');
+    expect(resolveInstrumentCategory(30, false)).toBe('guitar-driven');
+    // Guitar Harmonics really does decay, and stays plucked.
+    expect(resolveInstrumentCategory(31, false)).toBe('plucked');
+    expect(resolveInstrumentCategory(24, false)).toBe('plucked');
+
+    constructedInstances.length = 0;
+    createInstrument(29, false);
+    const [{ options }] = instancesOfType('PolySynth');
+    const { envelope } = (options as { options: { envelope: { sustain: number } } }).options;
+    expect(envelope.sustain).toBeGreaterThan(0.3);
+  });
+
   it('resolves by name keyword', () => {
     expect(resolveInstrumentCategory('Piano', false)).toBe('piano');
     expect(resolveInstrumentCategory('Electric Piano', false)).toBe('electric-piano');
@@ -162,10 +193,14 @@ describe('createInstrument: piano', () => {
   it('connect and dispose delegate to the underlying voice', () => {
     const handle = createInstrument('Piano', false);
     const [{ instance }] = instancesOfType('PolySynth');
+    const trim = instancesOfType('Gain').at(-1)!.instance;
     const target = {} as Tone.ToneAudioNode;
     handle.connect(target);
     handle.dispose();
-    expect(instance.connect).toHaveBeenCalledWith(target);
+    // Every family now carries a calibration trim, so the voice reaches the
+    // target through that node rather than connecting to it directly.
+    expect(instance.connect).toHaveBeenCalledWith(trim);
+    expect(trim.connect).toHaveBeenCalledWith(target);
     expect(instance.dispose).toHaveBeenCalledTimes(1);
   });
 });
@@ -180,12 +215,16 @@ describe('createInstrument: electric piano', () => {
 });
 
 describe('createInstrument: strings', () => {
-  it('builds a slow-attack PolySynth wrapping Synth', () => {
+  it('builds a PolySynth wrapping Synth whose attack still reads as bowed', () => {
     createInstrument('Strings', false);
     const [{ options }] = instancesOfType('PolySynth');
     const { voice, options: voiceOptions } = options as { voice: unknown; options: { envelope: { attack: number } } };
     expect(voice).toBe(Tone.Synth);
-    expect(voiceOptions.envelope.attack).toBeGreaterThan(0.3);
+    // Slower than a struck voice, but shorter than the notes it is asked to
+    // play: at 0.6s a quarter-note was released before the envelope had
+    // reached full level, costing ~9dB on any ordinary passage.
+    expect(voiceOptions.envelope.attack).toBeGreaterThan(0.1);
+    expect(voiceOptions.envelope.attack).toBeLessThanOrEqual(0.3);
   });
 });
 
@@ -221,7 +260,8 @@ describe('createInstrument: drum kit', () => {
     expect(instancesOfType('MembraneSynth')).toHaveLength(1);
     expect(instancesOfType('NoiseSynth')).toHaveLength(2);
     expect(instancesOfType('Filter')).toHaveLength(1);
-    expect(instancesOfType('Gain')).toHaveLength(1);
+    // The kit's own mixer Gain, plus the calibration trim every family carries.
+    expect(instancesOfType('Gain')).toHaveLength(2);
   });
 
   it('routes GM kick notes to the MembraneSynth', () => {
@@ -260,11 +300,13 @@ describe('createInstrument: drum kit', () => {
 
   it('connect wires the shared Gain output; dispose tears down every internal node', () => {
     const handle = createInstrument('Drums', true);
-    const gain = instancesOfType('Gain')[0].instance;
+    const [mixer, trim] = instancesOfType('Gain').map((g) => g.instance);
     const target = {} as Tone.ToneAudioNode;
 
     handle.connect(target);
-    expect(gain.connect).toHaveBeenCalledWith(target);
+    // Kit voices -> its own mixer -> the calibration trim -> the target.
+    expect(mixer.connect).toHaveBeenCalledWith(trim);
+    expect(trim.connect).toHaveBeenCalledWith(target);
 
     handle.dispose();
     for (const type of ['MembraneSynth', 'NoiseSynth', 'Filter', 'Gain']) {
@@ -403,7 +445,13 @@ describe('every pitched instrument is polyphonic', () => {
   // strictly greater than previous start time" and that note never sounded.
   // Checked across all 128 GM programs rather than for the bass alone, because
   // the defect is a whole class: any voice not wrapped in a PolySynth has it.
-  const MONOPHONIC = ['Synth', 'AMSynth', 'FMSynth', 'MonoSynth'];
+  //
+  // `MembraneSynth` belongs on this list and was missing from it, which is how
+  // the Percussive family (GM 112-119) shipped monophonic and went on throwing
+  // the very error the list exists to catch. Any Tone voice extending
+  // Monophonic goes here; the drum kit's own mono voices are exempt below
+  // because they serialise colliding hits instead of dropping them.
+  const MONOPHONIC = ['Synth', 'AMSynth', 'FMSynth', 'MonoSynth', 'MembraneSynth'];
 
   it('constructs no standalone monophonic voice for any GM program', () => {
     const offenders: string[] = [];
@@ -417,6 +465,18 @@ describe('every pitched instrument is polyphonic', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('builds the pitched percussion voice polyphonically, keeping its struck timbre', () => {
+    // GM 112-119 are pitched percussion played on a melodic channel: a synth
+    // tom part routinely lands several notes at once, and a bare MembraneSynth
+    // threw on every one after the first. The fix is polyphony, not a different
+    // sound - it must still be a MembraneSynth underneath.
+    constructedInstances.length = 0;
+    createInstrument(118, false); // Synth Drum
+    const [poly] = instancesOfType('PolySynth');
+    expect(poly).toBeDefined();
+    expect((poly.options as { voice: { name: string } }).voice.name).toBe('MembraneSynth');
   });
 
   it('builds the bass as a PolySynth of MonoSynth voices, keeping the timbre', () => {
@@ -441,24 +501,56 @@ describe('instrument output levels', () => {
     return trim ? (trim.options as { value: number }).value : 1;
   }
 
-  it('divides a three-oscillator unison voice by three so it does not bury the mix', () => {
-    // `fatsawtooth`/`fatsine` with count 3 sum three detuned copies, arriving
-    // ~9.5dB hotter than any single-oscillator voice. Nothing reconciled that,
-    // which is how one track came to overpower the others regardless of its
-    // MIDI volume.
-    expect(trimGain('String Ensemble 1')).toBeCloseTo(1 / 3, 4);
-    expect(trimGain('Church Organ')).toBeCloseTo(1 / 3, 4);
-    expect(trimGain('Pad 1 (new age)')).toBeCloseTo(1 / 3, 4);
+  /** Measured raw level (dB) of each family, from the table in instruments.ts. */
+  const MEASURED_RAW_DB: Record<string, number> = {
+    Flute: -6.1, // pipe
+    'Lead 1 (square)': -6.4, // synth-lead
+    'Church Organ': -8.5, // organ
+    Trumpet: -10.0, // brass
+    Violin: -10.5, // strings
+    'Acoustic Bass': -12.3, // bass
+    'Pad 1 (new age)': -12.7, // synth-pad
+    'String Ensemble 1': -15.1, // ensemble
+  };
+  const TARGET_DB = -14;
+  const toDb = (gain: number): number => 20 * Math.log10(gain);
+
+  it('lands every non-struck family on one common level, whatever its oscillators produce', () => {
+    // The bug: nothing reconciled the families, so their raw output spanned
+    // 24dB. A `pipe` patch (one sine) sat ~18dB above a `synth-pad` and ~24dB
+    // above a hi-hat, which no per-track MIDI volume can compensate for — a
+    // quiet family was simply inaudible beside a loud one, and arrangements
+    // lost whole parts. Trims are now derived from measured RMS rather than
+    // reasoned about, so this asserts the outcome, not the arithmetic.
+    for (const [name, rawDb] of Object.entries(MEASURED_RAW_DB)) {
+      expect(rawDb + toDb(trimGain(name))).toBeCloseTo(TARGET_DB, 1);
+    }
   });
 
-  it('brings a square-wave voice down to a sine wave RMS', () => {
-    // Square RMS 1.0 against sine's 0.707 -> about -3dB.
-    expect(trimGain('Lead 1 (square)')).toBeCloseTo(Math.SQRT1_2, 4);
+  it('holds struck voices at the peak ceiling instead, rather than exploding them', () => {
+    // Piano, plucked, pitched percussion and the kit are a spike followed by a
+    // decay: they peak as loud as a flute while carrying far less average
+    // energy. Forcing their RMS up to a flute's would make them clip, so the
+    // peak ceiling wins and they settle below target — correct, not a miss.
+    const struck: Array<[string | number, number, boolean]> = [
+      ['Acoustic Grand Piano', 0.781, false],
+      ['Acoustic Guitar (nylon)', 0.781, false],
+      [112, 0.791, false], // Tinkle Bell -> percussive
+      [0, 0.999, true], // drum kit
+    ];
+    for (const [nameOrProgram, measuredPeak, isPercussion] of struck) {
+      const peakAfterTrim = measuredPeak * trimGain(nameOrProgram, isPercussion);
+      expect(peakAfterTrim).toBeLessThanOrEqual(0.9 + 1e-6);
+      expect(peakAfterTrim).toBeCloseTo(0.9, 2);
+    }
   });
 
-  it('leaves a single-oscillator voice untouched, adding no node for it', () => {
-    expect(trimGain('Flute')).toBe(1);
-    expect(trimGain('Acoustic Bass')).toBe(1);
+  it('keeps the whole calibrated spread inside a musically sane range', () => {
+    // A blanket guard: whatever the individual numbers, no family may end up
+    // more than 8dB from another once trimmed. The defect being pinned was a
+    // 24dB spread.
+    const levels = Object.entries(MEASURED_RAW_DB).map(([name, rawDb]) => rawDb + toDb(trimGain(name)));
+    expect(Math.max(...levels) - Math.min(...levels)).toBeLessThan(8);
   });
 
   it('covers every category, so a new family cannot ship untrimmed', () => {

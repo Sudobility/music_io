@@ -1,0 +1,158 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Instrument calibration</title>
+    <style>
+      body { font: 13px/1.5 ui-monospace, monospace; padding: 16px; }
+      pre { white-space: pre; }
+    </style>
+  </head>
+  <body>
+    <h1>Instrument calibration</h1>
+    <p id="status">measuring…</p>
+    <pre id="out"></pre>
+    <script type="module">
+      // TEMPORARY measurement harness. Renders one reference note per voice
+      // family through the *real* createInstrument in an OfflineAudioContext,
+      // and reports peak/RMS so the per-family trims can be set from measured
+      // loudness instead of guessed at. Delete once the trims are calibrated.
+      import * as Tone from 'tone';
+      import { createInstrument } from '@sudobility/music_io/web';
+
+      // One representative GM program per category (drum-kit comes from the
+      // percussion flag, which overrides the program).
+      const CASES = [
+        ['piano', 0, false, 60],
+        ['electric-piano', 4, false, 60],
+        ['chromatic-percussion', 8, false, 60],
+        ['organ', 16, false, 60],
+        ['plucked', 24, false, 60],
+        ['guitar-driven', 29, false, 60],
+        ['bass', 32, false, 40],
+        ['strings', 40, false, 60],
+        ['ensemble', 48, false, 60],
+        ['brass', 56, false, 60],
+        ['reed', 64, false, 60],
+        ['pipe', 72, false, 72],
+        ['synth-lead', 80, false, 60],
+        ['synth-pad', 88, false, 60],
+        ['synth-effects', 96, false, 60],
+        ['percussive', 112, false, 60],
+        ['drum-kit (kick)', 0, true, 36],
+        ['drum-kit (snare)', 0, true, 38],
+        ['drum-kit (hat)', 0, true, 42],
+      ];
+
+      const VELOCITY = 0.8;
+      const START = 0.1;
+      const RENDER_SECONDS = 6;
+
+      /** Renders one note and returns { peak, rms, rmsInNote }. */
+      async function measure(program, isPercussion, midi, durationSec) {
+        const buffer = await Tone.Offline(() => {
+          const inst = createInstrument(program, isPercussion);
+          inst.connect(Tone.getDestination());
+          inst.triggerAttackRelease(midi, durationSec, START, VELOCITY);
+        }, RENDER_SECONDS);
+        const data = buffer.getChannelData(0);
+        const rate = buffer.sampleRate;
+        let peak = 0;
+        let sumSq = 0;
+        let sumSqNote = 0;
+        let nNote = 0;
+        const noteEnd = Math.floor((START + durationSec) * rate);
+        for (let i = 0; i < data.length; i++) {
+          const a = Math.abs(data[i]);
+          if (a > peak) peak = a;
+          sumSq += data[i] * data[i];
+          if (i >= Math.floor(START * rate) && i < noteEnd) {
+            sumSqNote += data[i] * data[i];
+            nNote++;
+          }
+        }
+        return {
+          peak,
+          rms: Math.sqrt(sumSq / data.length),
+          rmsInNote: nNote ? Math.sqrt(sumSqNote / nNote) : 0,
+        };
+      }
+
+      const db = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+      const fmt = (x) => (Number.isFinite(x) ? x.toFixed(1).padStart(6) : '  -inf');
+
+      /**
+       * How long the voice actually sounds for a note that asks for `durationSec`.
+       * A soundfont holds a sustaining instrument for the whole note; a synth
+       * voice with sustain 0 decays away regardless, which reads as notes being
+       * cut short. Reported as the fraction of the note still audible at 90% of
+       * its way through, and the total time above -40dB.
+       */
+      async function measureSustain(program, isPercussion, midi, durationSec) {
+        const buffer = await Tone.Offline(() => {
+          const inst = createInstrument(program, isPercussion);
+          inst.connect(Tone.getDestination());
+          inst.triggerAttackRelease(midi, durationSec, START, VELOCITY);
+        }, durationSec + 4);
+        const data = buffer.getChannelData(0);
+        const rate = buffer.sampleRate;
+        let peak = 0;
+        for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
+        const floor = peak * 0.01; // -40dB
+        let last = 0;
+        for (let i = 0; i < data.length; i++) if (Math.abs(data[i]) > floor) last = i;
+        // Local peak around 90% through the note, as a fraction of the note's peak.
+        const at = Math.floor((START + durationSec * 0.9) * rate);
+        let late = 0;
+        for (let i = at; i < Math.min(data.length, at + Math.floor(0.02 * rate)); i++) {
+          late = Math.max(late, Math.abs(data[i]));
+        }
+        return { sounding: last / rate - START, heldFraction: peak ? late / peak : 0 };
+      }
+
+      const rows = [];
+      for (const [label, program, perc, midi] of CASES) {
+        const long = await measure(program, perc, midi, 1.0);
+        const short = await measure(program, perc, midi, 0.25);
+        const sustain = await measureSustain(program, perc, midi, 2.0);
+        rows.push({ label, long, short, sustain });
+        document.getElementById('status').textContent = `measured ${rows.length}/${CASES.length}`;
+      }
+
+      // Reference: the loudest in-note RMS on the long note becomes 0 dB.
+      const ref = Math.max(...rows.map((r) => r.long.rmsInNote));
+      const lines = [
+        'family                   held@90%  sounds  asked   ratio',
+        '--------------------------------------------------------',
+        ...rows.map((r) =>
+          [
+            r.label.padEnd(24),
+            (r.sustain.heldFraction * 100).toFixed(0).padStart(7) + '%',
+            r.sustain.sounding.toFixed(2).padStart(7),
+            '   2.00',
+            (r.sustain.sounding / 2).toFixed(2).padStart(7),
+          ].join(' '),
+        ),
+        '',
+        'family                    longRMS  long_dB  shortRMS short_dB  short-long  peak',
+        '------------------------------------------------------------------------------',
+        ...rows.map((r) =>
+          [
+            r.label.padEnd(24),
+            fmt(db(r.long.rmsInNote)),
+            fmt(db(r.long.rmsInNote / ref)),
+            fmt(db(r.short.rmsInNote)),
+            fmt(db(r.short.rmsInNote / ref)),
+            fmt(db(r.short.rmsInNote) - db(r.long.rmsInNote)),
+            r.long.peak.toFixed(3).padStart(7),
+          ].join(' '),
+        ),
+      ];
+      const text = lines.join('\n');
+      document.getElementById('out').textContent = text;
+      document.getElementById('status').textContent = 'done';
+      globalThis.__calibration = text;
+      console.log(text);
+    </script>
+  </body>
+</html>

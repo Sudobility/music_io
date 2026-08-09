@@ -57,6 +57,7 @@ export type InstrumentCategory =
   | 'chromatic-percussion'
   | 'organ'
   | 'plucked'
+  | 'guitar-driven'
   | 'bass'
   | 'strings'
   | 'ensemble'
@@ -72,55 +73,87 @@ export type InstrumentCategory =
 // ---- output levels ---------------------------------------------------------
 
 /**
- * Amplitude trim, in dB, for a voice that sums `count` detuned copies of one
- * oscillator (Tone's `fatsawtooth`/`fatsine`).
+ * Per-family output trim, in dB — **measured, not modelled**.
  *
- * Straight arithmetic, not taste: three oscillators at the same amplitude sum
- * to roughly three times one of them, so the voice needs dividing by three to
- * sit alongside a single-oscillator voice.
+ * Every voice ran at whatever level its oscillators happened to produce, and
+ * the spread across families was 24dB: a `pipe` patch (one sine) came out
+ * nearly 18dB above a `synth-pad` and 24dB above a hi-hat. No per-track MIDI
+ * volume can compensate for that, so a quiet family simply could not be heard
+ * next to a loud one and the arrangement lost whole parts.
+ *
+ * These numbers come from rendering one reference note per family through
+ * `createInstrument` in an OfflineAudioContext with every trim at zero, and
+ * measuring in-note RMS and peak (C4, velocity 0.8, one second):
+ *
+ *     family                 rawRMS   peak      trim    result
+ *     piano                  -19.0   0.781      +1.2    -17.8  peak-limited
+ *     electric-piano         -25.1   0.252     +11.1    -14.0
+ *     chromatic-percussion   -25.8   0.251     +11.1    -14.7  peak-limited
+ *     organ                   -8.5   0.823      -5.5    -14.0
+ *     plucked                -20.3   0.781      +1.2    -19.1  peak-limited
+ *     guitar-driven          -13.0   0.766      -1.0    -14.0
+ *     bass                   -12.3   0.748      -1.7    -14.0
+ *     strings                -10.5   0.776      -3.5    -14.0
+ *     ensemble               -15.1   0.657      +1.1    -14.0
+ *     brass                  -10.0   0.886      -4.0    -14.0
+ *     reed                    -5.9   0.782      -8.1    -14.0
+ *     pipe                    -6.1   0.799      -7.9    -14.0
+ *     synth-lead              -6.4   0.784      -7.6    -14.0
+ *     synth-pad              -12.7   0.748      -1.3    -14.0
+ *     synth-effects          -25.7   0.146     +11.7    -14.0
+ *     percussive             -16.3   0.795      +1.1    -15.2  peak-limited
+ *     drum-kit               -19.8   0.999      -0.9    -20.7  peak-limited
+ *
+ * The rule is `min(TARGET - rawRMS, headroom to PEAK_CEILING)`: bring every
+ * family to a common RMS, but never at the cost of clipping. The families that
+ * hit the peak limit are precisely the struck ones — piano, plucked, pitched
+ * percussion, the kit — and their sitting lower in RMS is not an error but
+ * crest factor: a struck note is a spike followed by decay, so it peaks as
+ * loud as a flute while carrying far less average energy. Forcing them to a
+ * flute's RMS would make them explode.
+ *
+ * Re-measure with `tools/calibrate.html` if a voice's oscillators or envelope
+ * change — a patch edit invalidates its row here. It needs a bundler that can
+ * resolve `tone` and this package plus a real OfflineAudioContext, so drop it
+ * into a consuming app's root and open it there.
  */
-function unisonTrimDb(count: number): number {
-  return -20 * Math.log10(count);
+/** Common in-note RMS every family is brought to, where its peak allows. */
+const CALIBRATION_TARGET_DB = -14;
+/** No trim may push a family's measured peak above this. */
+const CALIBRATION_PEAK_CEILING = 0.9;
+
+/** The measurements above, kept as data so the trims cannot drift from them. */
+const MEASURED_RAW: Record<InstrumentCategory, { rmsDb: number; peak: number }> = {
+  piano: { rmsDb: -19.0, peak: 0.781 },
+  'electric-piano': { rmsDb: -25.1, peak: 0.252 },
+  'chromatic-percussion': { rmsDb: -25.8, peak: 0.251 },
+  organ: { rmsDb: -8.5, peak: 0.823 },
+  plucked: { rmsDb: -20.3, peak: 0.781 },
+  'guitar-driven': { rmsDb: -13.0, peak: 0.766 },
+  bass: { rmsDb: -12.3, peak: 0.748 },
+  strings: { rmsDb: -10.5, peak: 0.776 },
+  ensemble: { rmsDb: -15.1, peak: 0.657 },
+  brass: { rmsDb: -10.0, peak: 0.886 },
+  reed: { rmsDb: -5.9, peak: 0.782 },
+  pipe: { rmsDb: -6.1, peak: 0.799 },
+  'synth-lead': { rmsDb: -6.4, peak: 0.784 },
+  'synth-pad': { rmsDb: -12.7, peak: 0.748 },
+  'synth-effects': { rmsDb: -25.7, peak: 0.146 },
+  percussive: { rmsDb: -16.3, peak: 0.795 },
+  'drum-kit': { rmsDb: -19.8, peak: 0.999 },
+};
+
+/**
+ * Bring the family to `CALIBRATION_TARGET_DB`, but never past the point where
+ * its measured peak would exceed `CALIBRATION_PEAK_CEILING`.
+ */
+function calibratedTrimDb({ rmsDb, peak }: { rmsDb: number; peak: number }): number {
+  return Math.min(CALIBRATION_TARGET_DB - rmsDb, 20 * Math.log10(CALIBRATION_PEAK_CEILING / peak));
 }
 
-/**
- * A square wave's RMS is 1.0 against a sine's 0.707, so it arrives ~3dB hot.
- *
- * This is the one waveform difference corrected here, because it is the one
- * that follows from arithmetic. Sawtooth reads louder than sine to the ear
- * despite a *lower* RMS — its energy is spread over harmonics the ear is more
- * sensitive to — but putting a number on that is a perceptual judgement, not a
- * calculation, so it is deliberately left alone rather than guessed at.
- */
-const SQUARE_TRIM_DB = -20 * Math.log10(1 / Math.SQRT1_2);
-
-/**
- * Per-family output trim.
- *
- * Every voice used to run at unity, which is why a track could overpower the
- * rest of the mix however its MIDI volume and velocities were set: an
- * `ensemble` patch is three detuned sawtooths and a `pipe` patch is one sine,
- * and nothing reconciled them. A `Record` over the category union rather than a
- * partial map, so adding an instrument family cannot silently ship untrimmed.
- */
-const OUTPUT_TRIM_DB: Record<InstrumentCategory, number> = {
-  piano: 0, // Sampler, or a single-triangle fallback
-  'electric-piano': 0, // FM, single carrier
-  'chromatic-percussion': 0, // FM sine
-  organ: unisonTrimDb(3), // fatsine, count 3
-  plucked: 0, // sawtooth
-  bass: 0, // sawtooth
-  strings: 0, // sawtooth
-  ensemble: unisonTrimDb(3), // fatsawtooth, count 3
-  brass: 0, // sawtooth
-  reed: SQUARE_TRIM_DB, // square
-  pipe: 0, // sine
-  'synth-lead': SQUARE_TRIM_DB, // square
-  'synth-pad': unisonTrimDb(3), // fatsine, count 3
-  'synth-effects': 0, // AM sine
-  percussive: 0, // membrane
-  'drum-kit': 0, // membrane + noise
-};
+const OUTPUT_TRIM_DB = Object.fromEntries(
+  Object.entries(MEASURED_RAW).map(([category, measured]) => [category, calibratedTrimDb(measured)]),
+) as Record<InstrumentCategory, number>;
 
 /** dB to linear gain, computed here rather than via `Tone.dbToGain` so the conversion is testable against a mocked Tone. */
 function dbToGain(db: number): number {
@@ -215,6 +248,12 @@ function categoryForProgram(program: number): InstrumentCategory {
   if (!instrument) return 'piano';
   // Electric Piano 1/2 sit in the piano family but have their own voice.
   if (program === 4 || program === 5) return 'electric-piano';
+  // Overdriven and Distortion Guitar sit in the guitar family but do not decay
+  // like a plucked string — sustain is the whole point of driving an amp. On
+  // the plucked voice a two-second note died after 0.56s, so held guitar lines
+  // came out chopped. Guitar Harmonics (31) is left plucked: it really does
+  // decay.
+  if (program === 29 || program === 30) return 'guitar-driven';
   return FAMILY_CATEGORY[instrument.family];
 }
 
@@ -303,7 +342,7 @@ function createStringsInstrument(): InstrumentHandle {
   return wrapVoice(
     new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'sawtooth' },
-      envelope: { attack: 0.6, decay: 0.3, sustain: 0.8, release: 1.2 },
+      envelope: { attack: 0.25, decay: 0.3, sustain: 0.8, release: 1.2 },
     }),
   );
 }
@@ -383,12 +422,27 @@ function createPluckedInstrument(): InstrumentHandle {
   );
 }
 
+/**
+ * Overdriven/distortion guitar: a plucked attack that then *holds*, because a
+ * driven amp keeps feeding the string. Sawtooth like `plucked`, so it stays
+ * recognisably a guitar, but with a real sustain level instead of decaying to
+ * silence.
+ */
+function createDrivenGuitarInstrument(): InstrumentHandle {
+  return wrapVoice(
+    new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sawtooth' },
+      envelope: { attack: 0.005, decay: 0.25, sustain: 0.55, release: 0.35 },
+    }),
+  );
+}
+
 /** String/choir ensembles: like `strings` but detuned and slower, for the massed effect. */
 function createEnsembleInstrument(): InstrumentHandle {
   return wrapVoice(
     new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'fatsawtooth', count: 3, spread: 30 },
-      envelope: { attack: 0.9, decay: 0.4, sustain: 0.85, release: 1.6 },
+      envelope: { attack: 0.4, decay: 0.4, sustain: 0.85, release: 1.6 },
     }),
   );
 }
@@ -435,7 +489,7 @@ function createSynthPadInstrument(): InstrumentHandle {
   return wrapVoice(
     new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'fatsine', count: 3, spread: 40 },
-      envelope: { attack: 1.6, decay: 0.5, sustain: 0.9, release: 3 },
+      envelope: { attack: 0.6, decay: 0.5, sustain: 0.9, release: 3 },
     }),
   );
 }
@@ -453,12 +507,25 @@ function createSynthEffectsInstrument(): InstrumentHandle {
   );
 }
 
-/** Taiko, melodic tom, steel drums, woodblock: pitched percussion — a struck membrane, unlike the unpitched kit. */
+/**
+ * Taiko, melodic tom, steel drums, woodblock: pitched percussion — a struck
+ * membrane, unlike the unpitched kit.
+ *
+ * `PolySynth(MembraneSynth)`, not a bare `MembraneSynth`, for exactly the
+ * reason the bass is a `PolySynth(MonoSynth)`: a MembraneSynth has one
+ * oscillator, so a second note starting at the same moment made Tone throw
+ * "Start time must be strictly greater than previous start time" and that note
+ * never sounded. These are melodic parts played on an ordinary channel — a
+ * synth-tom line hits several notes at once routinely, and one real file
+ * peaked at fourteen — so every overlap past the first was being dropped.
+ */
 function createPercussiveInstrument(): InstrumentHandle {
   return wrapVoice(
-    new Tone.MembraneSynth({
+    new Tone.PolySynth(Tone.MembraneSynth, {
       octaves: 2,
-      envelope: { attack: 0.001, decay: 0.5, sustain: 0, release: 0.5 },
+      // Rings rather than clicks: a taiko or steel drum has a long tail, and at
+      // decay 0.5 a two-second note was gone after 0.35s.
+      envelope: { attack: 0.001, decay: 1.2, sustain: 0, release: 0.8 },
     }),
   );
 }
@@ -545,6 +612,36 @@ function createDrumKitInstrument(): InstrumentHandle {
   };
 }
 
+/**
+ * What to resolve a track's synthesized voice from: its GM program number when
+ * it has a meaningful one, otherwise its free-text instrument name.
+ *
+ * The program is a precise, standardised identifier; the name is prose. Every
+ * path that writes a track here derives the name *from* the program (the track
+ * editor patches both together for exactly that reason), so where the two
+ * disagree it is the name that is lossy — and reading the name first meant the
+ * precise program was never consulted at all.
+ *
+ * What that cost: the Percussive family (GM 112-119) is full of *pitched*
+ * instruments whose names read as drums — "Synth Drum", "Steel Drums", "Taiko
+ * Drum". Matched by name, each was handed the unpitched kit and played back as
+ * bursts of noise instead of notes.
+ *
+ * Program 0 falls through to the name because it is ambiguous: it is both
+ * "Acoustic Grand Piano" and the value a track gets when nothing ever set one
+ * (a MusicXML part may name an instrument and give no program). Nothing is lost
+ * by reading the name in that case — a name matching no pattern resolves to
+ * piano, which is what program 0 means anyway.
+ *
+ * A percussion clef still wins over both: that is the score stating outright
+ * that the track is a kit, and a GM drum track's program byte is meaningless
+ * (one real file's was 16, a drawbar organ).
+ */
+export function voiceSourceFor(track: { midiProgram: number; instrumentName: string }): string | number {
+  if (track.midiProgram > 0) return track.midiProgram;
+  return track.instrumentName || track.midiProgram;
+}
+
 // ---- entry point --------------------------------------------------------------
 
 /**
@@ -571,6 +668,8 @@ function createForCategory(category: InstrumentCategory): InstrumentHandle {
       return createOrganInstrument();
     case 'plucked':
       return createPluckedInstrument();
+    case 'guitar-driven':
+      return createDrivenGuitarInstrument();
     case 'strings':
       return createStringsInstrument();
     case 'ensemble':

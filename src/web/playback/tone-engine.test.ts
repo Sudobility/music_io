@@ -126,6 +126,12 @@ vi.mock('tone', () => {
       mock.record('Panner', { pan }, this);
     }
   }
+  class Limiter extends mock.MockAudioNode {
+    constructor(public threshold?: number) {
+      super();
+      mock.record('Limiter', { threshold }, this);
+    }
+  }
   class Filter extends mock.MockAudioNode {
     constructor(
       public frequency?: number,
@@ -183,6 +189,7 @@ vi.mock('tone', () => {
   return {
     Gain,
     Panner,
+    Limiter,
     Filter,
     Synth,
     FMSynth,
@@ -310,6 +317,25 @@ function asGainInstance(node: { instance: InstanceType<typeof mock.MockAudioNode
   return node.instance as unknown as { gain: { value: number } };
 }
 
+/**
+ * The per-track channel Gains, in track order.
+ *
+ * Found by structure rather than by index: each instrument now builds its own
+ * calibration trim Gain, so "master is 0, channels follow" no longer holds.
+ * The channel Gain is the one built immediately after that track's Panner,
+ * which is stable however many nodes a voice adds.
+ */
+function channelGains(): Array<{ gain: { value: number } }> {
+  const nodes = mock.state.constructedNodes;
+  const result: Array<{ gain: { value: number } }> = [];
+  nodes.forEach((node, i) => {
+    if (node.type !== 'Panner') return;
+    const next = nodes.slice(i + 1).find((n) => n.type === 'Gain');
+    if (next) result.push(asGainInstance(next));
+  });
+  return result;
+}
+
 beforeEach(() => {
   resetMockTone();
 });
@@ -353,10 +379,11 @@ describe('TonePlaybackEngine.loadScore: scheduling', () => {
   it('builds one Gain+Panner channel per track and wires the instrument through them', async () => {
     const engine = new TonePlaybackEngine();
     await engine.loadScore(twoTrackScore());
-    const gains = mock.state.constructedNodes.filter((n) => n.type === 'Gain');
     const panners = mock.state.constructedNodes.filter((n) => n.type === 'Panner');
-    // 2 tracks => 2 channel Gains + 1 master Gain; 2 Panners.
-    expect(gains).toHaveLength(3);
+    // One Panner and one channel Gain per track. The total Gain count also
+    // includes the master and each voice's calibration trim, so it is the
+    // per-track structure that is asserted here, not a raw node tally.
+    expect(channelGains()).toHaveLength(2);
     expect(panners).toHaveLength(2);
   });
 
@@ -428,8 +455,7 @@ describe('TonePlaybackEngine: mute/solo', () => {
     const score = twoTrackScore();
     await engine.loadScore(score);
     const [trackA] = score.tracks;
-    // Gain construction order: master gain (index 0), then one per track in order.
-    const gain = asGainInstance(mock.state.constructedNodes.filter((n) => n.type === 'Gain')[1]);
+    const [gain] = channelGains();
 
     engine.setTrackMute(trackA.id, true);
     expect(gain.gain.value).toBe(0);
@@ -443,19 +469,15 @@ describe('TonePlaybackEngine: mute/solo', () => {
     const score = twoTrackScore();
     await engine.loadScore(score);
     const [trackA, trackB] = score.tracks;
-    // Gain construction order: master gain (index 0), then one per track in order.
-    const channelGains = mock.state.constructedNodes
-      .filter((n) => n.type === 'Gain')
-      .slice(1, 3)
-      .map((n) => asGainInstance(n));
+    const gains = channelGains();
 
     engine.setTrackSolo(trackA.id, true);
 
-    expect(channelGains[0].gain.value).toBe(trackA.volume); // soloed track A: audible
-    expect(channelGains[1].gain.value).toBe(0); // non-soloed track B: silenced
+    expect(gains[0].gain.value).toBe(trackA.volume); // soloed track A: audible
+    expect(gains[1].gain.value).toBe(0); // non-soloed track B: silenced
 
     engine.setTrackSolo(trackA.id, false);
-    expect(channelGains[1].gain.value).toBe(trackB.volume); // solo cleared: back to normal
+    expect(gains[1].gain.value).toBe(trackB.volume); // solo cleared: back to normal
   });
 
   it('a no-op setTrackMute for an unknown track id does not throw', async () => {
@@ -679,6 +701,90 @@ describe('TonePlaybackEngine: master volume', () => {
     engine.setMasterVolume(0.4);
     const masterGain = mock.state.constructedNodes.find((n) => n.type === 'Gain')!;
     expect(asGainInstance(masterGain).gain.value).toBe(0.4);
+  });
+});
+
+describe('TonePlaybackEngine: which voice a track gets', () => {
+  /** A one-track score whose track carries the given GM program and free-text name. */
+  function scoreWithInstrument(midiProgram: number, instrumentName: string, clef: Track['clef'] = 'treble'): Score {
+    const score = twinkleScore();
+    return { ...score, tracks: [{ ...score.tracks[0], midiProgram, instrumentName, clef }] };
+  }
+
+  const constructedTypes = (): string[] => mock.state.constructedNodes.map((n) => n.type);
+
+  it('resolves a pitched percussion program by its program number, not its name', async () => {
+    // GM 118 "Synth Drum" is in the Percussive family (112-119): a *pitched*
+    // instrument, played on an ordinary melodic channel. Resolving it from its
+    // free-text name matched "drum" and handed it the unpitched kit, so every
+    // note came out as a burst of filtered noise at no particular pitch. The
+    // same trap catches "Steel Drums" (114) and "Taiko Drum" (116).
+    const engine = new TonePlaybackEngine();
+    await engine.loadScore(scoreWithInstrument(118, 'Synth Drum'));
+    // The pitched percussive voice is a PolySynth of MembraneSynth voices; the
+    // drum kit is a MembraneSynth *plus* two NoiseSynths behind a Filter.
+    const poly = mock.state.constructedNodes.find((n) => n.type === 'PolySynth');
+    expect((poly?.options as { voice: { name: string } } | undefined)?.voice.name).toBe('MembraneSynth');
+    expect(constructedTypes()).not.toContain('NoiseSynth');
+  });
+
+  it('still gives a percussion-clef track the drum kit whatever its program says', async () => {
+    // The clef is the score's explicit statement that this track is a kit, and
+    // it has to keep beating the program — a GM drum track's program byte is
+    // meaningless (this file's was 16, a drawbar organ).
+    const engine = new TonePlaybackEngine();
+    await engine.loadScore(scoreWithInstrument(16, 'Power Kit', 'percussion'));
+    expect(constructedTypes()).toContain('NoiseSynth');
+  });
+
+  it('falls back to the name when there is no program to go on', async () => {
+    // MusicXML can name an instrument without giving a program at all, and
+    // program 0 is both "Acoustic Grand Piano" and the value you get when the
+    // field was never set. Reading the name there loses nothing: a name that
+    // matches nothing lands on piano, which is what program 0 means anyway.
+    const engine = new TonePlaybackEngine();
+    await engine.loadScore(scoreWithInstrument(0, 'String Ensemble'));
+    // `ensemble` is a PolySynth of fatsawtooth voices, trimmed - so a Gain trim
+    // node exists that the untrimmed piano fallback would not create.
+    const gains = mock.state.constructedNodes.filter((n) => n.type === 'Gain');
+    expect(gains.length).toBeGreaterThan(2); // master + channel + the ensemble trim
+  });
+});
+
+describe('TonePlaybackEngine: mix headroom', () => {
+  /** The master Gain is the first one constructed; channel Gains follow. */
+  function masterGainValue(): number {
+    return asGainInstance(mock.state.constructedNodes.find((n) => n.type === 'Gain')!).gain.value;
+  }
+
+  it('leaves the master at unity for a single track, which has nothing to sum with', async () => {
+    const engine = new TonePlaybackEngine();
+    await engine.loadScore(twinkleScore()); // one track
+    expect(masterGainValue()).toBeCloseTo(1, 4);
+  });
+
+  it('opens headroom as tracks are added, so a multi-track score does not sum past full scale', async () => {
+    // A nine-track arrangement summed to ~2.5x full scale with the master
+    // pinned at unity, so the mix clipped for most of the piece and the
+    // quieter voices vanished into the distortion. Power summing (1/sqrt(n))
+    // is the law for sources that are not phase-correlated, which separate
+    // instrument parts are not.
+    const engine = new TonePlaybackEngine();
+    await engine.loadScore(twoTrackScore());
+    expect(masterGainValue()).toBeCloseTo(1 / Math.sqrt(2), 4);
+  });
+
+  it('scales headroom underneath the user-set master volume rather than replacing it', async () => {
+    const engine = new TonePlaybackEngine();
+    await engine.loadScore(twoTrackScore());
+    engine.setMasterVolume(0.5);
+    expect(masterGainValue()).toBeCloseTo(0.5 / Math.sqrt(2), 4);
+  });
+
+  it('routes the master through a limiter, so a coherent peak clips nothing', async () => {
+    const engine = new TonePlaybackEngine();
+    await engine.initialize();
+    expect(mock.state.constructedNodes.filter((n) => n.type === 'Limiter')).toHaveLength(1);
   });
 });
 
