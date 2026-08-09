@@ -147,6 +147,12 @@ vi.mock('tone', () => {
       mock.record('Synth', options, this);
     }
   }
+  class AMSynth extends mock.MockInstrumentNode {
+    constructor(public options?: unknown) {
+      super();
+      mock.record('AMSynth', options, this);
+    }
+  }
   class FMSynth extends mock.MockInstrumentNode {
     constructor(public options?: unknown) {
       super();
@@ -192,6 +198,7 @@ vi.mock('tone', () => {
     Limiter,
     Filter,
     Synth,
+    AMSynth,
     FMSynth,
     MonoSynth,
     MembraneSynth,
@@ -202,6 +209,8 @@ vi.mock('tone', () => {
       mock.state.startCalls += 1;
     }),
     getTransport: mock.getTransport,
+    now: () => 0,
+    getContext: () => ({ currentTime: 0 }),
   };
 });
 
@@ -395,12 +404,21 @@ describe('TonePlaybackEngine.loadScore: scheduling', () => {
     const onEventId = noteEventIds()[0];
     mock.fire(onEventId, 0);
 
-    const polySynth = asInstrumentInstance(mock.state.constructedNodes.find((n) => n.type === 'PolySynth')!);
-    expect(polySynth.triggerAttackRelease).toHaveBeenCalledTimes(1);
-    const [frequency, duration, , velocity] = polySynth.triggerAttackRelease.mock.calls[0];
+    // The piano is two velocity layers, so a note reaches both. Frequency and
+    // duration are identical on each; only the velocity split differs.
+    const layers = mock.state.constructedNodes
+      .filter((n) => n.type === 'PolySynth')
+      .map((n) => asInstrumentInstance(n));
+    expect(layers).toHaveLength(2);
+    for (const layer of layers) expect(layer.triggerAttackRelease).toHaveBeenCalledTimes(1);
+
+    const [frequency, duration] = layers[0].triggerAttackRelease.mock.calls[0];
     expect(frequency).toBeCloseTo(261.626, 1); // C4
     expect(duration).toBeCloseTo(0.5, 3); // quarter note at 120bpm = 0.5s
-    expect(velocity).toBeCloseTo(80 / 127, 5);
+
+    const velocities = layers.map((l) => l.triggerAttackRelease.mock.calls[0][3] as number);
+    // Equal-power split: the note still carries exactly the velocity written.
+    expect(Math.hypot(...velocities)).toBeCloseTo(80 / 127, 5);
   });
 
   it('reports active notes via the observer on note-on and note-off', async () => {
@@ -748,6 +766,29 @@ describe('TonePlaybackEngine: which voice a track gets', () => {
     // node exists that the untrimmed piano fallback would not create.
     const gains = mock.state.constructedNodes.filter((n) => n.type === 'Gain');
     expect(gains.length).toBeGreaterThan(2); // master + channel + the ensemble trim
+  });
+});
+
+describe('TonePlaybackEngine: auditioning a percussion track', () => {
+  it('auditions a drum track on the kit, not on a pitched voice', async () => {
+    // `noteOn` hardcoded isPercussion=false, so tapping a note on a drum track
+    // sounded a pitched instrument while the same note played back as a drum.
+    const engine = new TonePlaybackEngine();
+    await engine.initialize();
+    engine.noteOn(38, 0, true); // Acoustic Snare on a percussion-clef track
+    expect(mock.state.constructedNodes.map((n) => n.type)).toContain('NoiseSynth');
+  });
+
+  it('keeps a pitched and a percussion audition voice apart on the same program', async () => {
+    // Both can be program 0: sharing one cached voice would give whichever was
+    // tapped first to the other.
+    const engine = new TonePlaybackEngine();
+    await engine.initialize();
+    engine.noteOn(60, 0, false);
+    const pitchedOnly = mock.state.constructedNodes.filter((n) => n.type === 'NoiseSynth').length;
+    expect(pitchedOnly).toBe(0);
+    engine.noteOn(38, 0, true);
+    expect(mock.state.constructedNodes.filter((n) => n.type === 'NoiseSynth').length).toBeGreaterThan(0);
   });
 });
 

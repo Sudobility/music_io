@@ -23,7 +23,7 @@
  */
 import * as Tone from 'tone';
 import type { DecodedAudio, RenderPlan } from '@sudobility/music_types';
-import { createInstrument, voiceSourceFor } from '../playback/instruments.js';
+import { createInstrument, voiceSourceFor } from '../playback/instruments/index.js';
 import { headroomTrimFor, LIMITER_CEILING_DB } from '../playback/mix.js';
 
 export type { RenderEvent, RenderPlan, RenderTrack } from '@sudobility/music_types';

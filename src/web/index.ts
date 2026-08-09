@@ -14,7 +14,7 @@ export type { RenderEvent } from './audio/render.js';
 import type { MusicIo } from '../shared/types.js';
 
 export { TonePlaybackEngine, WebXmlParser, WebFileExporter, ToneJsMidiCodec };
-export * from './playback/instruments.js';
+export * from './playback/instruments/index.js';
 export * from './playback/schedule.js';
 export * from './playback/midi.js';
 export type { MusicIo };

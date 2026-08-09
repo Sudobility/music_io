@@ -1,11 +1,11 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.6.17",
+  "version": "0.6.18",
   "author": "Sudobility",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sudobility/music_lib": "^1.7.15",
-    "@sudobility/music_types": "^0.11.7",
+    "@sudobility/music_lib": "^1.7.16",
+    "@sudobility/music_types": "^0.11.9",
     "@tonejs/midi": "^2.0.28",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
@@ -20,8 +20,8 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
-    "@sudobility/music_lib": "^1.7.15",
-    "@sudobility/music_types": "^0.11.7",
+    "@sudobility/music_lib": "^1.7.16",
+    "@sudobility/music_types": "^0.11.9",
     "@tonejs/midi": "^2.0.28",
     "fast-xml-parser": "",
     "react-native-audio-api": ">=0.13.0",

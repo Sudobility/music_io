@@ -49,17 +49,12 @@ import * as Tone from 'tone';
 import { TempoMap } from '@sudobility/music_lib';
 import type { Score } from '@sudobility/music_types';
 import type { ScoreRange } from '@sudobility/music_lib';
-import { createInstrument, voiceSourceFor } from './instruments.js';
-import { headroomTrimFor, LIMITER_CEILING_DB } from './mix.js';
-import type { InstrumentHandle } from './instruments.js';
-import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
+import { Mixer } from './mixer.js';
+import { AuditionVoices } from './audition.js';
+import { Metronome } from './metronome.js';
+import { flattenScoreForPlayback } from './schedule.js';
 import type { ScheduledNote } from './schedule.js';
 import { normalizeVelocity } from './midi.js';
-
-/** Auditioned notes sound at a fixed mezzo-forte; a tap carries no velocity. */
-const AUDITION_VELOCITY = 0.8;
-/** How long a struck voice rings when auditioned, since it cannot be held. */
-const AUDITION_STRUCK_SECONDS = 0.4;
 import { scoreEndTick } from '@sudobility/music_lib';
 import type { PlaybackEngine, PlaybackObserver } from '@sudobility/music_types';
 
@@ -68,39 +63,20 @@ const POSITION_TICK_INTERVAL_SECONDS = 1 / 30;
 const MIN_NOTE_DURATION_SECONDS = 0.01;
 /** How far past the score's final tick the auto-stop fires — after the last note-offs scheduled at exactly the end, and far enough that float rounding in seconds conversion can't order it before them. */
 const END_OF_SCORE_STOP_EPSILON_SECONDS = 0.05;
-const METRONOME_ACCENT_HZ = 1500;
-const METRONOME_BEAT_HZ = 1000;
-const METRONOME_CLICK_SECONDS = 0.03;
-
-type TrackChannel = {
-  instrument: InstrumentHandle;
-  panner: Tone.Panner;
-  gain: Tone.Gain;
-  /** Runtime (possibly live-overridden — see `setTrackMute`/`setTrackSolo`) mute/solo/volume, seeded from `Track` on a genuine `loadScore` reload. */
-  muted: boolean;
-  solo: boolean;
-  volume: number;
-};
 
 export class TonePlaybackEngine implements PlaybackEngine {
   private score: Score | null = null;
   private tempoMap: TempoMap = new TempoMap([], 480);
   private scheduledNotes: ScheduledNote[] = [];
-  private channels = new Map<string, TrackChannel>();
+  private readonly mixer = new Mixer();
+  private readonly audition = new AuditionVoices();
+  private readonly metronome = new Metronome();
   private observer: PlaybackObserver | null = null;
 
   private tempoMultiplier = 1;
   private loopRange: ScoreRange | null = null;
-  private metronomeEnabled = false;
-  private masterVolume = 1;
-
-  private masterGain: Tone.Gain | null = null;
-  private masterLimiter: Tone.Limiter | null = null;
-  private metronomeSynth: Tone.Synth | null = null;
   /** Ids of the schedule()/scheduleRepeat() calls that make up note playback + the position ticker; all cleared/rebuilt together (`scheduleAll`). */
   private noteEventIds: number[] = [];
-  /** Metronome click ids, tracked separately so toggling the metronome never disturbs note scheduling. */
-  private metronomeEventIds: number[] = [];
   private activeNoteIds = new Set<string>();
 
   private initialized = false;
@@ -122,61 +98,27 @@ export class TonePlaybackEngine implements PlaybackEngine {
     if (this.initialized) return;
     await Tone.start();
     this.ensureBaseBpm();
-    this.ensureMasterGain();
+    this.mixer.ensureMaster();
     this.attachVisibilityHandler();
     this.initialized = true;
   }
 
-  /**
-   * Voices used only for auditioning held keys, one per program.
-   *
-   * Deliberately not the track channels: a tapped key may belong to a track
-   * that is muted, soloed away or not even loaded, and borrowing a channel
-   * would also mean a `loadScore` mid-tap disposing the voice out from under a
-   * sounding note.
-   */
-  private auditionVoices = new Map<number, InstrumentHandle>();
-  /** Pitches currently held by `noteOn`, so `noteOff` knows which voice to release. */
-  private auditionHeld = new Map<number, InstrumentHandle>();
-
-  noteOn(midi: number, program: number): void {
+  noteOn(midi: number, program: number, isPercussion = false): void {
     // The audio context starts suspended until a gesture resumes it. A tap *is*
     // that gesture, so start here rather than making the first tap silent.
     void Tone.start();
-    this.ensureMasterGain();
-
-    let voice = this.auditionVoices.get(program);
-    if (!voice) {
-      voice = createInstrument(program, false);
-      if (this.masterGain) voice.connect(this.masterGain);
-      this.auditionVoices.set(program, voice);
-    }
-
-    // Retrigger cleanly if the same pitch is already held.
-    this.auditionHeld.get(midi)?.triggerRelease?.(midi);
-
-    if (voice.triggerAttack) {
-      voice.triggerAttack(midi, AUDITION_VELOCITY);
-      this.auditionHeld.set(midi, voice);
-    } else {
-      // A struck voice -- a drum kit -- has no sustain to hold, so it just
-      // sounds once and there is nothing for noteOff to release.
-      voice.triggerAttackRelease(midi, AUDITION_STRUCK_SECONDS, Tone.now(), AUDITION_VELOCITY);
-    }
+    this.audition.noteOn(midi, program, isPercussion, this.mixer.ensureMaster());
   }
 
   noteOff(midi: number): void {
-    const voice = this.auditionHeld.get(midi);
-    if (!voice) return;
-    this.auditionHeld.delete(midi);
-    voice.triggerRelease?.(midi);
+    this.audition.noteOff(midi);
   }
 
   async loadScore(score: Score): Promise<void> {
     this.score = score;
     this.tempoMap = new TempoMap(score.tempoMap, score.ppq);
     this.scheduledNotes = flattenScoreForPlayback(score);
-    this.rebuildChannels(true);
+    this.mixer.rebuild(this.score, true);
     this.scheduleAll();
   }
 
@@ -240,27 +182,20 @@ export class TonePlaybackEngine implements PlaybackEngine {
   }
 
   setTrackMute(trackId: string, muted: boolean): void {
-    const channel = this.channels.get(trackId);
-    if (!channel) return;
-    channel.muted = muted;
-    this.applyChannelGains();
+    this.mixer.setMute(trackId, muted);
   }
 
   setTrackSolo(trackId: string, solo: boolean): void {
-    const channel = this.channels.get(trackId);
-    if (!channel) return;
-    channel.solo = solo;
-    this.applyChannelGains();
+    this.mixer.setSolo(trackId, solo);
   }
 
   setMetronome(enabled: boolean): void {
-    this.metronomeEnabled = enabled;
+    this.metronome.setEnabled(enabled);
     this.rescheduleMetronome();
   }
 
   setMasterVolume(volume: number): void {
-    this.masterVolume = volume;
-    this.applyMasterGain();
+    this.mixer.setMasterVolume(volume);
   }
 
   setObserver(observer: PlaybackObserver | null): void {
@@ -273,25 +208,12 @@ export class TonePlaybackEngine implements PlaybackEngine {
     transport.stop();
     transport.cancel(0);
     this.noteEventIds = [];
-    this.metronomeEventIds = [];
+    this.metronome.forgetSchedule();
 
-    for (const channel of this.channels.values()) {
-      channel.instrument.dispose();
-      channel.panner.dispose();
-      channel.gain.dispose();
-    }
-    this.channels.clear();
-
-    for (const voice of this.auditionVoices.values()) voice.dispose();
-    this.auditionVoices.clear();
-    this.auditionHeld.clear();
-
-    this.metronomeSynth?.dispose();
-    this.metronomeSynth = null;
-    this.masterGain?.dispose();
-    this.masterGain = null;
-    this.masterLimiter?.dispose();
-    this.masterLimiter = null;
+    this.mixer.disposeChannels();
+    this.audition.dispose();
+    this.metronome.dispose();
+    this.mixer.disposeMaster();
 
     if (this.visibilityHandler && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.visibilityHandler);
@@ -322,21 +244,6 @@ export class TonePlaybackEngine implements PlaybackEngine {
   private ensureBaseBpm(): void {
     const bpm = Tone.getTransport().bpm;
     if (bpm.value !== BASE_BPM) bpm.value = BASE_BPM;
-  }
-
-  private ensureMasterGain(): Tone.Gain {
-    if (!this.masterGain) {
-      this.masterLimiter = new Tone.Limiter(LIMITER_CEILING_DB).toDestination();
-      this.masterGain = new Tone.Gain(this.masterVolume);
-      this.masterGain.connect(this.masterLimiter);
-      this.applyMasterGain();
-    }
-    return this.masterGain;
-  }
-
-  /** The user's master volume with the track-count headroom folded underneath it. */
-  private applyMasterGain(): void {
-    if (this.masterGain) this.masterGain.gain.value = this.masterVolume * headroomTrimFor(this.channels.size);
   }
 
   private attachVisibilityHandler(): void {
@@ -376,60 +283,8 @@ export class TonePlaybackEngine implements PlaybackEngine {
    * score-relative second, not relative to "now".
    */
   private silenceAndReschedule(): void {
-    this.rebuildChannels(false);
+    this.mixer.rebuild(this.score, false);
     this.scheduleAll();
-  }
-
-  /**
-   * Tears down and recreates every track's instrument/panner/gain nodes
-   * (see class doc's "No stuck notes"). When `reseedFromScore` is true
-   * (a genuine `loadScore`), each channel's mute/solo/volume is read fresh
-   * from `Track`; otherwise (silencing for pause/stop/seek/tempo-change)
-   * the previous *runtime* mute/solo/volume is preserved, so a live-only
-   * `setTrackMute`/`setTrackSolo` override (not yet persisted to the score
-   * — that's the UI's job, not this engine's) survives across it.
-   */
-  private rebuildChannels(reseedFromScore: boolean): void {
-    const previous = this.channels;
-    for (const channel of previous.values()) {
-      channel.instrument.dispose();
-      channel.panner.dispose();
-      channel.gain.dispose();
-    }
-    this.channels = new Map();
-    if (!this.score) return;
-
-    const master = this.ensureMasterGain();
-    for (const track of this.score.tracks) {
-      const runtime = !reseedFromScore ? previous.get(track.id) : undefined;
-      const instrument = createInstrument(voiceSourceFor(track), track.clef === 'percussion');
-      const panner = new Tone.Panner(track.pan);
-      const gain = new Tone.Gain(1);
-      instrument.connect(panner);
-      panner.connect(gain);
-      gain.connect(master);
-
-      this.channels.set(track.id, {
-        instrument,
-        panner,
-        gain,
-        muted: runtime?.muted ?? track.muted,
-        solo: runtime?.solo ?? track.solo,
-        volume: runtime?.volume ?? track.volume,
-      });
-    }
-    // After the channels exist, so the trim sees the new track count.
-    this.applyMasterGain();
-    this.applyChannelGains();
-  }
-
-  /** Applies spec §10 mute/solo semantics: if any track is soloed, only soloed tracks are audible; otherwise every non-muted track is. */
-  private applyChannelGains(): void {
-    const anySolo = Array.from(this.channels.values()).some((c) => c.solo);
-    for (const channel of this.channels.values()) {
-      const audible = anySolo ? channel.solo : !channel.muted;
-      channel.gain.gain.value = audible ? channel.volume : 0;
-    }
   }
 
   /** (Re)schedules every note-on/off callback and the position ticker. Always starts by cancelling every previously-scheduled event (spec: "reschedule safely after edits"). */
@@ -440,8 +295,8 @@ export class TonePlaybackEngine implements PlaybackEngine {
     this.noteEventIds = [];
 
     for (const note of this.scheduledNotes) {
-      const channel = this.channels.get(note.trackId);
-      if (!channel) continue;
+      const instrument = this.mixer.instrumentFor(note.trackId);
+      if (!instrument) continue;
 
       const startSeconds = this.scheduledSeconds(note.tick);
       const endSeconds = this.scheduledSeconds(note.tick + note.durTicks);
@@ -457,7 +312,7 @@ export class TonePlaybackEngine implements PlaybackEngine {
         // drum kit's mono NoiseSynth voices; see instruments.ts's
         // monotonicTime for the trigger-level fix.)
         try {
-          channel.instrument.triggerAttackRelease(note.midi, durationSeconds, time, velocity);
+          instrument.triggerAttackRelease(note.midi, durationSeconds, time, velocity);
         } catch (error) {
           console.error('TonePlaybackEngine: note trigger failed', note.noteId, error);
         }
@@ -500,28 +355,7 @@ export class TonePlaybackEngine implements PlaybackEngine {
   }
 
   private rescheduleMetronome(): void {
-    const transport = Tone.getTransport();
-    for (const id of this.metronomeEventIds) transport.clear(id);
-    this.metronomeEventIds = [];
-    if (!this.metronomeEnabled || !this.score) return;
-
-    for (const click of metronomeClicks(this.score)) {
-      const seconds = this.scheduledSeconds(click.tick);
-      const id = transport.schedule((time) => {
-        const frequency = click.accent ? METRONOME_ACCENT_HZ : METRONOME_BEAT_HZ;
-        this.ensureMetronomeSynth().triggerAttackRelease(frequency, METRONOME_CLICK_SECONDS, time);
-      }, seconds);
-      this.metronomeEventIds.push(id);
-    }
-  }
-
-  private ensureMetronomeSynth(): Tone.Synth {
-    if (!this.metronomeSynth) {
-      this.metronomeSynth = new Tone.Synth({
-        envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 },
-      }).toDestination();
-    }
-    return this.metronomeSynth;
+    this.metronome.reschedule(this.score, (tick) => this.scheduledSeconds(tick));
   }
 
   private applyLoop(): void {

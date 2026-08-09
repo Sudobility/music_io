@@ -9,7 +9,8 @@ import { midiToHertz } from './midi.js';
 // `vi.mock` factories are hoisted above the rest of the module, so any
 // state/helpers they close over must be created via `vi.hoisted` (plain
 // top-level `const`s would be accessed before initialization).
-const { MockNode, constructedInstances, record } = vi.hoisted(() => {
+const { MockNode, constructedInstances, record, clock } = vi.hoisted(() => {
+  const clock = { now: 0 };
   class MockNode {
     triggerAttackRelease = vi.fn();
     connect = vi.fn();
@@ -23,7 +24,7 @@ const { MockNode, constructedInstances, record } = vi.hoisted(() => {
     constructedInstances.push({ type, options, instance });
   }
 
-  return { MockNode, constructedInstances, record };
+  return { MockNode, constructedInstances, record, clock };
 });
 
 vi.mock('tone', () => {
@@ -93,15 +94,16 @@ vi.mock('tone', () => {
       record('Gain', { value }, this);
     }
   }
-  return { Synth, AMSynth, FMSynth, MonoSynth, MembraneSynth, NoiseSynth, Sampler, PolySynth, Filter, Gain };
+  return { Synth, AMSynth, FMSynth, MonoSynth, MembraneSynth, NoiseSynth, Sampler, PolySynth, Filter, Gain, now: () => clock.now };
 });
 
 import * as Tone from 'tone';
-import { createInstrument, resolveInstrumentCategory } from './instruments.js';
+import { createInstrument, resolveInstrumentCategory } from './instruments/index.js';
 import { GM_INSTRUMENTS } from '@sudobility/music_lib';
 
 beforeEach(() => {
   constructedInstances.length = 0;
+  clock.now = 0;
 });
 
 function instancesOfType(type: string) {
@@ -145,6 +147,78 @@ describe('resolveInstrumentCategory', () => {
     expect(envelope.sustain).toBeGreaterThan(0.3);
   });
 
+  it('overrides the family where GM files an instrument that does not behave like it', () => {
+    // The GM families group by catalogue position, not by behaviour. Taking the
+    // family voice made a timpani a bowed cello and a harpsichord a piano that
+    // rings, so these are named individually.
+    expect(resolveInstrumentCategory(47, false)).toBe('percussive'); // Timpani, filed under strings
+    expect(resolveInstrumentCategory(45, false)).toBe('plucked'); // Pizzicato Strings
+    expect(resolveInstrumentCategory(46, false)).toBe('plucked'); // Orchestral Harp
+    expect(resolveInstrumentCategory(55, false)).toBe('stab'); // Orchestra Hit, filed under ensemble
+    expect(resolveInstrumentCategory(6, false)).toBe('harpsichord');
+    expect(resolveInstrumentCategory(7, false)).toBe('harpsichord'); // Clavinet
+    expect(resolveInstrumentCategory(119, false)).toBe('reverse-swell'); // Reverse Cymbal
+
+    // The rest of each family is untouched.
+    expect(resolveInstrumentCategory(40, false)).toBe('strings'); // Violin
+    expect(resolveInstrumentCategory(48, false)).toBe('ensemble'); // String Ensemble 1
+    expect(resolveInstrumentCategory(0, false)).toBe('piano'); // Acoustic Grand
+    expect(resolveInstrumentCategory(118, false)).toBe('percussive'); // Synth Drum
+  });
+
+  it('splits the chromatic-percussion family by how long each member rings', () => {
+    // The family runs from a xylophone's dry click to tubular bells still
+    // sounding many seconds later — a thirty-fold range that one decay cannot
+    // cover. Sharing it made the wooden mallets ring like bells and the bells
+    // stop like woodblocks.
+    expect(resolveInstrumentCategory(12, false)).toBe('mallet-wood'); // Marimba
+    expect(resolveInstrumentCategory(13, false)).toBe('mallet-wood'); // Xylophone
+    expect(resolveInstrumentCategory(11, false)).toBe('vibraphone');
+    expect(resolveInstrumentCategory(14, false)).toBe('tubular-bell');
+    // Celesta, glockenspiel, music box and dulcimer keep the middling ring.
+    expect(resolveInstrumentCategory(8, false)).toBe('chromatic-percussion');
+    expect(resolveInstrumentCategory(15, false)).toBe('chromatic-percussion');
+  });
+
+  it('orders the mallet decays the way the instruments do', () => {
+    const decayOf = (program: number): number => {
+      constructedInstances.length = 0;
+      createInstrument(program, false);
+      const [{ options }] = instancesOfType('PolySynth');
+      return (options as { options: { envelope: { decay: number } } }).options.envelope.decay;
+    };
+    expect(decayOf(13)).toBeLessThan(decayOf(8)); // xylophone shorter than celesta
+    expect(decayOf(8)).toBeLessThan(decayOf(11)); // celesta shorter than vibraphone
+    expect(decayOf(11)).toBeLessThan(decayOf(14)); // vibraphone shorter than tubular bells
+  });
+
+  it('gives the concrete sound effects a noise voice, not a pitched one', () => {
+    // Seashore, applause and a gunshot have no note to play; they used to share
+    // the pitched AM-sine FX voice with FX 1-8.
+    for (const program of [120, 122, 126, 127]) {
+      expect(resolveInstrumentCategory(program, false)).toBe('noise-effects');
+    }
+    expect(resolveInstrumentCategory(96, false)).toBe('synth-effects'); // FX 1 (rain) stays pitched
+  });
+
+  it('ignores the pitch it is handed on a voice that has none', () => {
+    // A NoiseSynth takes (duration, time, velocity) — no frequency. Passing one
+    // would throw, and a gunshot has no pitch to pass anyway.
+    const handle = createInstrument(126, false); // Applause
+    const [noise] = instancesOfType('NoiseSynth').map((c) => c.instance);
+    handle.triggerAttackRelease(60, 0.4, 2, 0.7);
+    expect(noise.triggerAttackRelease).toHaveBeenCalledWith(0.4, 2, 0.7);
+  });
+
+  it('makes the reverse cymbal swell instead of decay', () => {
+    createInstrument(119, false);
+    const [noise] = instancesOfType('NoiseSynth');
+    const { envelope } = noise.options as { envelope: { attack: number; decay: number } };
+    // Backwards is the instrument: it fades *in* and then stops.
+    expect(envelope.attack).toBeGreaterThan(0.5);
+    expect(envelope.attack).toBeGreaterThan(envelope.decay);
+  });
+
   it('resolves by name keyword', () => {
     expect(resolveInstrumentCategory('Piano', false)).toBe('piano');
     expect(resolveInstrumentCategory('Electric Piano', false)).toBe('electric-piano');
@@ -179,15 +253,24 @@ describe('createInstrument: piano', () => {
     createInstrument('Piano', false);
     expect(instancesOfType('Sampler')).toHaveLength(0);
     const polySynths = instancesOfType('PolySynth');
-    expect(polySynths).toHaveLength(1);
-    expect((polySynths[0].options as { voice: unknown }).voice).toBe(Tone.Synth);
+    expect(polySynths).toHaveLength(2); // dark + bright velocity layers
+    for (const p of polySynths) expect((p.options as { voice: unknown }).voice).toBe(Tone.Synth);
   });
 
-  it('triggerAttackRelease converts midi to hertz and forwards duration/time/velocity', () => {
+  it('converts midi to hertz, forwards duration/time, and splits velocity across the layers', () => {
     const handle = createInstrument('Piano', false);
-    const [{ instance }] = instancesOfType('PolySynth');
+    const [dark, bright] = instancesOfType('PolySynth').map((p) => p.instance);
     handle.triggerAttackRelease(60, 0.5, 1.25, 0.8);
-    expect(instance.triggerAttackRelease).toHaveBeenCalledWith(midiToHertz(60), 0.5, 1.25, 0.8);
+
+    for (const layer of [dark, bright]) {
+      expect(layer.triggerAttackRelease).toHaveBeenCalledWith(midiToHertz(60), 0.5, 1.25, expect.any(Number));
+    }
+    const vDark = dark.triggerAttackRelease.mock.calls[0][3] as number;
+    const vBright = bright.triggerAttackRelease.mock.calls[0][3] as number;
+    // Louder means brighter, and the split is equal-power so the note keeps
+    // exactly the amplitude the velocity asked for.
+    expect(vBright).toBeGreaterThan(vDark);
+    expect(Math.hypot(vDark, vBright)).toBeCloseTo(0.8, 5);
   });
 
   it('connect and dispose delegate to the underlying voice', () => {
@@ -206,11 +289,15 @@ describe('createInstrument: piano', () => {
 });
 
 describe('createInstrument: electric piano', () => {
-  it('builds a PolySynth wrapping FMSynth', () => {
+  it('builds two FM layers whose modulation index differs, which is its brightness', () => {
     createInstrument('Electric Piano', false);
     const polySynths = instancesOfType('PolySynth');
-    expect(polySynths).toHaveLength(1);
-    expect((polySynths[0].options as { voice: unknown }).voice).toBe(Tone.FMSynth);
+    expect(polySynths).toHaveLength(2); // dark + bright velocity layers
+    for (const p of polySynths) expect((p.options as { voice: unknown }).voice).toBe(Tone.FMSynth);
+    const index = polySynths.map(
+      (p) => (p.options as { options: { modulationIndex: number } }).options.modulationIndex,
+    );
+    expect(index[1]).toBeGreaterThan(index[0]);
   });
 });
 
@@ -242,26 +329,64 @@ describe('createInstrument: bass', () => {
 });
 
 describe('createInstrument: synth lead', () => {
-  it('builds a PolySynth wrapping Synth with a square oscillator', () => {
+  it('reaches its square timbre on the bright velocity layer', () => {
     createInstrument('Synth Lead', false);
-    const [{ options }] = instancesOfType('PolySynth');
-    const { voice, options: voiceOptions } = options as {
-      voice: unknown;
-      options: { oscillator: { type: string } };
-    };
-    expect(voice).toBe(Tone.Synth);
-    expect(voiceOptions.oscillator.type).toBe('square');
+    const types = instancesOfType('PolySynth').map(
+      (p) => (p.options as { options: { oscillator: { type: string } } }).options.oscillator.type,
+    );
+    // Soft notes are the mellow layer; hard notes bring in the square.
+    expect(types).toEqual(['triangle', 'square']);
   });
 });
 
 describe('createInstrument: drum kit', () => {
-  it('builds one MembraneSynth (kick) and two NoiseSynths (snare, hat) behind a Gain output', () => {
+  it('builds a voice per percussion behaviour, not one noise tick for everything', () => {
+    // Three voices used to cover the whole GM percussion map: kick, snare, and
+    // a single 50ms noise burst for the ~30 remaining instruments. Cymbals ring
+    // for seconds, hand drums are pitched, and cowbells and triangles are
+    // metallic — none of which a 50ms noise burst can be.
     createInstrument('Drums', false);
-    expect(instancesOfType('MembraneSynth')).toHaveLength(1);
-    expect(instancesOfType('NoiseSynth')).toHaveLength(2);
-    expect(instancesOfType('Filter')).toHaveLength(1);
-    // The kit's own mixer Gain, plus the calibration trim every family carries.
-    expect(instancesOfType('Gain')).toHaveLength(2);
+    expect(instancesOfType('MembraneSynth')).toHaveLength(3); // kick, tom, hand drum
+    expect(instancesOfType('NoiseSynth')).toHaveLength(5); // snare, closed/open hat, cymbal, shaker
+    expect(instancesOfType('FMSynth')).toHaveLength(2); // metallic, wood
+    expect(instancesOfType('Filter')).toHaveLength(4); // one colour per noise voice
+    // The kit's mixer Gain, five internal balance Gains, and the calibration
+    // trim every family carries.
+    expect(instancesOfType('Gain')).toHaveLength(7);
+  });
+
+  it('gives cymbals a long tail and the closed hat a short one', () => {
+    createInstrument('Drums', false);
+    const decays = instancesOfType('NoiseSynth').map(
+      (n) => (n.options as { envelope: { decay: number } }).envelope.decay,
+    );
+    // Ordered snare, closed hat, open hat, cymbal, shaker.
+    const [, closedHat, openHat, cymbal] = decays;
+    expect(cymbal).toBeGreaterThan(1); // a crash rings for seconds
+    expect(openHat).toBeGreaterThan(closedHat); // open rings, closed chokes
+    expect(closedHat).toBeLessThan(0.1);
+  });
+
+  it('sounds the pitched hand drums and metallic percussion at a pitch', () => {
+    const handle = createInstrument('Drums', false);
+    const handDrum = instancesOfType('MembraneSynth')[2].instance;
+    const metallic = instancesOfType('FMSynth')[0].instance;
+
+    handle.triggerAttackRelease(62, 0.2, 0, 0.8); // Mute Hi Conga
+    handle.triggerAttackRelease(56, 0.2, 1, 0.8); // Cowbell
+
+    expect(handDrum.triggerAttackRelease).toHaveBeenCalledWith(midiToHertz(62), 0.2, 0, 0.8);
+    expect(metallic.triggerAttackRelease).toHaveBeenCalledWith(midiToHertz(56), 0.2, 1, 0.8);
+  });
+
+  it('routes a crash to the cymbal voice rather than the hat', () => {
+    const handle = createInstrument('Drums', false);
+    const [, closedHat, , cymbal] = instancesOfType('NoiseSynth').map((c) => c.instance);
+
+    handle.triggerAttackRelease(49, 0.5, 0, 0.9); // Crash Cymbal 1
+
+    expect(cymbal.triggerAttackRelease).toHaveBeenCalledWith(0.5, 0, 0.9);
+    expect(closedHat.triggerAttackRelease).not.toHaveBeenCalled();
   });
 
   it('routes GM kick notes to the MembraneSynth', () => {
@@ -300,7 +425,9 @@ describe('createInstrument: drum kit', () => {
 
   it('connect wires the shared Gain output; dispose tears down every internal node', () => {
     const handle = createInstrument('Drums', true);
-    const [mixer, trim] = instancesOfType('Gain').map((g) => g.instance);
+    const gains = instancesOfType('Gain').map((g) => g.instance);
+    const mixer = gains[0];
+    const trim = gains[gains.length - 1];
     const target = {} as Tone.ToneAudioNode;
 
     handle.connect(target);
@@ -322,8 +449,10 @@ describe('createInstrument: drum kit mono-voice retrigger guard', () => {
     const handle = createInstrument('Drums', true);
     const [, hat] = instancesOfType('NoiseSynth').map((c) => c.instance);
 
+    // Both on the *closed* hat voice: 46 (open) now has its own ringing voice,
+    // so the two hats no longer collide the way they used to.
     handle.triggerAttackRelease(42, 0.05, 1, 0.9); // Closed Hi-Hat
-    handle.triggerAttackRelease(46, 0.05, 1, 0.9); // Open Hi-Hat, same tick
+    handle.triggerAttackRelease(44, 0.05, 1, 0.9); // Pedal Hi-Hat, same tick
 
     const t1 = hat.triggerAttackRelease.mock.calls[0][1] as number;
     const t2 = hat.triggerAttackRelease.mock.calls[1][1] as number;
@@ -334,6 +463,25 @@ describe('createInstrument: drum kit mono-voice retrigger guard', () => {
     handle.triggerAttackRelease(42, 0.05, 0.5, 0.9);
     const t3 = hat.triggerAttackRelease.mock.calls[2][1] as number;
     expect(t3).toBeGreaterThan(t2);
+  });
+
+  it('stays monotonic when the scheduled time has already passed', () => {
+    // The failure this pins: Tone clamps a start time in the past up to `now`,
+    // so a batch of events firing late all collapse onto the same instant. The
+    // guard used to compare the nominal times, which were still distinct, and
+    // waved the collision through — the assertion then fired for real and the
+    // note was lost.
+    const handle = createInstrument('Drums', true);
+    const [, hat] = instancesOfType('NoiseSynth').map((c) => c.instance);
+
+    clock.now = 5; // the transport stalled; these two are already overdue
+    handle.triggerAttackRelease(42, 0.05, 1.0, 0.9);
+    handle.triggerAttackRelease(44, 0.05, 1.2, 0.9);
+
+    const t1 = hat.triggerAttackRelease.mock.calls[0][1] as number;
+    const t2 = hat.triggerAttackRelease.mock.calls[1][1] as number;
+    expect(t1).toBeGreaterThanOrEqual(5);
+    expect(t2).toBeGreaterThan(t1);
   });
 
   it('keeps distinct voices independent: a kick at the same time as a hat is not nudged', () => {
@@ -405,7 +553,7 @@ describe('per-family synth voices', () => {
     expect(resolveInstrumentCategory(96, false)).toBe('synth-effects'); // FX 1
     expect(resolveInstrumentCategory(104, false)).toBe('plucked'); // Sitar
     expect(resolveInstrumentCategory(112, false)).toBe('percussive'); // Tinkle Bell
-    expect(resolveInstrumentCategory(120, false)).toBe('synth-effects'); // Guitar Fret Noise
+    expect(resolveInstrumentCategory(120, false)).toBe('noise-effects'); // Guitar Fret Noise
   });
 
   it('keeps electric piano distinct from acoustic within the piano family', () => {
@@ -490,6 +638,48 @@ describe('every pitched instrument is polyphonic', () => {
   });
 });
 
+describe('velocity response', () => {
+  /** The velocities each layer of a voice was triggered with, for one note. */
+  function velocities(nameOrProgram: string | number, velocity: number): number[] {
+    constructedInstances.length = 0;
+    const handle = createInstrument(nameOrProgram, false);
+    handle.triggerAttackRelease(60, 0.5, 0, velocity);
+    return constructedInstances
+      .filter((c) => c.type === 'PolySynth')
+      .flatMap((c) => c.instance.triggerAttackRelease.mock.calls.map((call) => call[3] as number));
+  }
+
+  it('brightens as it gets louder, instead of only getting louder', () => {
+    // Velocity used to move amplitude and nothing else, which is not how an
+    // instrument behaves: a trumpet leant on turns brassy, a piano struck hard
+    // gains harmonics. The bright layer takes a growing share as velocity rises.
+    for (const instrument of ['Piano', 'Trumpet', 'Violin', 'Acoustic Bass', 'Synth Lead']) {
+      const [softDark, softBright] = velocities(instrument, 0.2);
+      const [loudDark, loudBright] = velocities(instrument, 0.95);
+      expect(softBright / softDark).toBeLessThan(loudBright / loudDark);
+    }
+  });
+
+  it('keeps the amplitude the velocity asked for while doing it', () => {
+    // Equal-power, so the two layers together never bulge above the written
+    // dynamic in the middle of the range where both are sounding.
+    for (const velocity of [0.1, 0.4, 0.8, 1]) {
+      expect(Math.hypot(...velocities('Piano', velocity))).toBeCloseTo(velocity, 5);
+    }
+  });
+
+  it('ignores velocity entirely on instruments that have no dynamics', () => {
+    // A drawbar organ's key is a switch and a harpsichord's plectrum plucks
+    // with a force the player cannot vary. Scaling either by velocity gave it
+    // an expressive range it does not physically have.
+    for (const instrument of ['Church Organ', 6]) {
+      const soft = velocities(instrument, 0.15);
+      const loud = velocities(instrument, 1);
+      expect(soft).toEqual(loud);
+    }
+  });
+});
+
 describe('instrument output levels', () => {
   /** The linear gain of the trim node `createInstrument` inserted, or 1 when it inserted none. */
   function trimGain(nameOrProgram: string | number, isPercussion = false): number {
@@ -504,11 +694,11 @@ describe('instrument output levels', () => {
   /** Measured raw level (dB) of each family, from the table in instruments.ts. */
   const MEASURED_RAW_DB: Record<string, number> = {
     Flute: -6.1, // pipe
-    'Lead 1 (square)': -6.4, // synth-lead
-    'Church Organ': -8.5, // organ
-    Trumpet: -10.0, // brass
-    Violin: -10.5, // strings
-    'Acoustic Bass': -12.3, // bass
+    'Lead 1 (square)': -5.3, // synth-lead
+    'Church Organ': -8.0, // organ
+    Trumpet: -8.6, // brass
+    Violin: -8.6, // strings
+    'Acoustic Bass': -10.9, // bass
     'Pad 1 (new age)': -12.7, // synth-pad
     'String Ensemble 1': -15.1, // ensemble
   };
@@ -533,10 +723,10 @@ describe('instrument output levels', () => {
     // energy. Forcing their RMS up to a flute's would make them clip, so the
     // peak ceiling wins and they settle below target — correct, not a miss.
     const struck: Array<[string | number, number, boolean]> = [
-      ['Acoustic Grand Piano', 0.781, false],
-      ['Acoustic Guitar (nylon)', 0.781, false],
-      [112, 0.791, false], // Tinkle Bell -> percussive
-      [0, 0.999, true], // drum kit
+      ['Acoustic Grand Piano', 0.717, false],
+      ['Acoustic Guitar (nylon)', 0.749, false],
+      [112, 0.795, false], // Tinkle Bell -> percussive
+      [0, 0.796, true], // drum kit — loudest voice is the cymbal
     ];
     for (const [nameOrProgram, measuredPeak, isPercussion] of struck) {
       const peakAfterTrim = measuredPeak * trimGain(nameOrProgram, isPercussion);
