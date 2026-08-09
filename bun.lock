@@ -9,7 +9,7 @@
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "@sudobility/music_lib": "^1.7.16",
+        "@sudobility/music_lib": "^1.7.17",
         "@sudobility/music_types": "^0.11.9",
         "@tonejs/midi": "^2.0.28",
         "@typescript-eslint/eslint-plugin": "^8.65.0",
@@ -25,7 +25,7 @@
         "vitest": "^4.1.10",
       },
       "peerDependencies": {
-        "@sudobility/music_lib": "^1.7.16",
+        "@sudobility/music_lib": "^1.7.17",
         "@sudobility/music_types": "^0.11.9",
         "@tonejs/midi": "^2.0.28",
         "fast-xml-parser": "",
@@ -148,7 +148,7 @@
 
     "@sudobility/music_client": ["@sudobility/music_client@0.1.1", "", { "dependencies": { "@sudobility/music_types": "^0.1.0" }, "peerDependencies": { "@sudobility/di": "^1.5.58", "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5", "react": ">=18" } }, "sha512-aHSfqHcmzlyRH7ZEAFV8tL2ZSJjxLzYTpexC3wNNCWQz0BOKEE4LH8WDRhx87Kl1Jl70ewl2ubO3XbzhzRsZwA=="],
 
-    "@sudobility/music_lib": ["@sudobility/music_lib@1.7.16", "", { "dependencies": { "immer": "^10.0.0 || ^11.0.0", "vexflow": "^4.2.5", "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/music_client": "^0.4.9", "@sudobility/music_types": "^0.11.8", "@tanstack/react-query": ">=5", "react": ">=18", "zustand": ">=5" } }, "sha512-CaidMYyNPuPRuKXcCw9IQLpExSAe0x+gf+ZKwz+nAD34WL82aMfaNvvzyzkXrAG7KsoN6VE49BibE3vVRkBb4A=="],
+    "@sudobility/music_lib": ["@sudobility/music_lib@1.7.17", "", { "dependencies": { "immer": "^10.0.0 || ^11.0.0", "vexflow": "^4.2.5", "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/music_client": "^0.4.10", "@sudobility/music_types": "^0.11.9", "@tanstack/react-query": ">=5", "react": ">=18", "zustand": ">=5" } }, "sha512-Wb7N+13NEmvbGolk0fWNUEsbcAbPgcerWj/qMeOHvokrfbLgus19tXjfCTXXGEkU00ef8uSYC4Bmi4ekwgfgUQ=="],
 
     "@sudobility/music_types": ["@sudobility/music_types@0.11.9", "", { "dependencies": { "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/types": "^1.9.64" } }, "sha512-H1qSJoEkw971ajbd4ejwBzE9TdpAyk/e6A9gqrkBvuRWtq/WDYLfvbmtS7Z+Quw8tOd/kQM2JXKuZrvc/AmcDg=="],
 
