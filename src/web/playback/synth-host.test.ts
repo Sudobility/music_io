@@ -108,6 +108,25 @@ describe('SynthHost', () => {
     expect(synths[1].calls.midiNoteOn?.[0]).toEqual([4, 60, 100]);
   });
 
+  it('sends a switched drum channel to the drum bank, not just the drum type', async () => {
+    // The type switch alone only routes *later* program changes to the drum
+    // bank; the channel keeps its default piano preset. A second drum track
+    // therefore played its congas and cowbells as piano notes. Measured against
+    // a real synth: channel 9 gave peak 0.1229, the type switch alone 0.1115,
+    // and the type switch plus this select matched channel 9 exactly.
+    const { host, synths } = await hostWith(1);
+    host.setChannelPercussion(0, 3);
+    expect(synths[0].calls.midiSetChannelType).toEqual([[3, true]]);
+    expect(synths[0].calls.midiProgramSelect).toEqual([[3, 1, 128, 0]]);
+  });
+
+  it('leaves channel 9 completely alone, which is what makes drums sound', async () => {
+    const { host, synths } = await hostWith(1);
+    host.setChannelPercussion(0, 9);
+    expect(synths[0].calls.midiSetChannelType).toBeUndefined();
+    expect(synths[0].calls.midiProgramSelect).toBeUndefined();
+  });
+
   it('applies interpolation to every instance, since the governor speaks for all of them', async () => {
     const { host, synths } = await hostWith(2);
     host.setInterpolation(4);

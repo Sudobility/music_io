@@ -81,11 +81,30 @@ describe('createSoundfontRenderer', () => {
     expect(audio.samples[0]).toBeCloseTo(0.5, 6);
   });
 
-  it('never selects a program on a percussion track', async () => {
-    // Selecting one silences the channel — measured in the spike.
+  it('never selects a program on channel 9, which silences it', async () => {
+    // Measured in the spike: every explicit selection there gave peak 0.0000.
+    // A lone percussion track takes channel 9, so nothing is selected at all.
     const synth = stubSynth();
     await rendererFor(synth)(plan({ tracks: [track({ isPercussion: true })], events: [] }));
     expect(synth.calls.midiProgramSelect).toBeUndefined();
+    expect(synth.calls.midiSetChannelType).toBeUndefined();
+  });
+
+  it('sends a second drum track to the drum bank, not just the drum channel type', async () => {
+    // Switching the type only routes later program changes to the drum bank —
+    // the channel keeps its default piano preset. Measured against a real
+    // synth, the type switch alone produced a different instrument entirely.
+    const synth = stubSynth();
+    await rendererFor(synth)(
+      plan({
+        tracks: [track({ id: 'd1', isPercussion: true }), track({ id: 'd2', isPercussion: true })],
+        events: [],
+      }),
+    );
+    const switched = synth.calls.midiSetChannelType?.[0];
+    expect(switched).toBeDefined();
+    const channel = switched![0] as number;
+    expect(synth.calls.midiProgramSelect).toContainEqual([channel, 1, 128, 0]);
   });
 
   it('selects the GM program for a pitched track', async () => {

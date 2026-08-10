@@ -41,6 +41,10 @@ const BLOCK_FRAMES = 128;
 const CC_VOLUME = 7;
 const CC_PAN = 10;
 const MAX_CC = 127;
+/** Where General MIDI keeps its drum kits; channel 9 is already there. */
+const DRUM_BANK = 128;
+/** The kit channel 9 defaults to, so a switched channel matches it. */
+const STANDARD_KIT = 0;
 
 type TimedEvent = { atFrame: number; run: () => void };
 
@@ -76,9 +80,15 @@ export function createSoundfontRenderer(
       const { channel } = assignment;
 
       if (track.isPercussion || assignment.needsDrumTypeSwitch) {
-        // Channel 9 is percussion already; anything else must be told. Never
-        // select a program on either — it silences the channel.
-        if (channel !== 9) synth.midiSetChannelType(channel, true);
+        // Channel 9 is percussion already; anything else must be told — and
+        // told twice. Switching the type only routes *later* program changes to
+        // the drum bank; the channel keeps the preset it had, which is a piano,
+        // so a second drum track rendered its congas as piano notes. Never
+        // select a melodic program on either: on channel 9 that silences it.
+        if (channel !== 9) {
+          synth.midiSetChannelType(channel, true);
+          synth.midiProgramSelect(channel, sfontId, DRUM_BANK, STANDARD_KIT);
+        }
       } else {
         synth.midiSetChannelType(channel, false);
         synth.midiProgramSelect(channel, sfontId, 0, track.midiProgram);

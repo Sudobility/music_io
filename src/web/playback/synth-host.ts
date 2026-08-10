@@ -41,6 +41,14 @@ export type SynthHostOptions = {
 /** Big enough that the worklet is not woken constantly, small enough not to add audible latency. */
 const RENDER_BUFFER_SIZE = 8192;
 
+/**
+ * Where General MIDI keeps its drum kits. Channel 9 is already there in GM
+ * mode; any other channel has to be sent there explicitly.
+ */
+const DRUM_BANK = 128;
+/** The kit channel 9 defaults to, so a switched channel matches it. */
+const STANDARD_KIT = 0;
+
 export class SynthHost {
   private synths: SynthInstance[] = [];
   private sfontIds: number[] = [];
@@ -108,7 +116,20 @@ export class SynthHost {
   setChannelPercussion(instance: number, channel: number): void {
     this.percussionChannels.add(`${instance}:${channel}`);
     if (channel === 9) return;
-    this.synths[instance]?.midiSetChannelType(channel, true);
+    const synth = this.synths[instance];
+    if (!synth) return;
+    synth.midiSetChannelType(channel, true);
+    // Switching the type is not enough on its own. It tells fluidsynth to read
+    // later program changes from the drum bank, but leaves the channel on the
+    // preset it already had — bank 0, program 0, a piano. A second drum track
+    // therefore played its congas and cowbells as piano notes at those pitches,
+    // which is exactly what it sounded like.
+    //
+    // Measured against a real synth: the same conga on channel 9 peaked 0.1229
+    // at 0.01187 RMS, this channel with only the type switch gave 0.1115 at
+    // 0.01437 — a different instrument — and with the select below it matched
+    // channel 9 to the digit.
+    synth.midiProgramSelect(channel, this.sfontIds[instance], DRUM_BANK, STANDARD_KIT);
   }
 
   /**
