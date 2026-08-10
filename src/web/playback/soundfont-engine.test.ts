@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { twoTrackScore } from '@sudobility/music_lib';
-import type { Score } from '@sudobility/music_types';
+import type { PlaybackLoadState, Score } from '@sudobility/music_types';
 import { SoundfontPlaybackEngine } from './soundfont-engine.js';
 
 /** Records everything the engine tells the synth host. */
@@ -242,6 +242,66 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
     release();
     await playing;
     expect(pump.running).toBe(false);
+  });
+
+  it('reports fetch progress, then indeterminate, then ready', async () => {
+    // Without this the transport looks broken for the whole load. The fetch is
+    // the measurable half; handing the font to fluidsynth reports nothing.
+    const host = stubHost();
+    const context = suspendableContext();
+    const engine = new SoundfontPlaybackEngine({
+      host,
+      moduleUrls: { fluidsynth: 'f.js', worklet: 'w.js' },
+      fontUrl: 'font.sf3',
+      loadFont: async (_url, onProgress) => {
+        onProgress?.({ loaded: 50, total: 100 });
+        onProgress?.({ loaded: 100, total: 100 });
+        return new Uint8Array(4).buffer;
+      },
+      createContext: () => context as never,
+      now: () => 0,
+      startPump: manualPump().start,
+    });
+    const seen: PlaybackLoadState[] = [];
+    engine.setObserver({
+      onPositionTick: () => {},
+      onActiveNotes: () => {},
+      onStateChange: () => {},
+      onLoadStateChange: (s) => seen.push(s),
+    });
+
+    await engine.initialize();
+    expect(seen.at(-1)).toEqual({ status: 'ready' });
+    // Fetching never claims the whole bar: seconds of decoding follow it, so a
+    // completed download reads as half done, then goes indeterminate.
+    const fractions = seen.filter((s) => s.status === 'loading').map((s) => s.fraction);
+    expect(fractions).toEqual([0, 0.25, 0.5, null]);
+  });
+
+  it('reports a failure rather than going quiet', async () => {
+    // A font that will not load is otherwise indistinguishable from silence.
+    const context = suspendableContext();
+    const engine = new SoundfontPlaybackEngine({
+      host: stubHost(),
+      moduleUrls: { fluidsynth: 'f.js', worklet: 'w.js' },
+      fontUrl: 'font.sf3',
+      loadFont: async () => {
+        throw new Error('Soundfont fetch failed: 404');
+      },
+      createContext: () => context as never,
+      now: () => 0,
+      startPump: manualPump().start,
+    });
+    const seen: PlaybackLoadState[] = [];
+    engine.setObserver({
+      onPositionTick: () => {},
+      onActiveNotes: () => {},
+      onStateChange: () => {},
+      onLoadStateChange: (s) => seen.push(s),
+    });
+
+    await expect(engine.initialize()).rejects.toThrow('404');
+    expect(seen.at(-1)).toEqual({ status: 'failed', message: 'Soundfont fetch failed: 404' });
   });
 
   it('brings the synth up only once for concurrent callers', async () => {

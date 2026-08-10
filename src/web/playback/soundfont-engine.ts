@@ -13,7 +13,13 @@
  * last one accumulated four silent-failure bugs.
  */
 import { TempoMap } from '@sudobility/music_lib';
-import type { PlaybackEngine, PlaybackObserver, Score, ScoreRange } from '@sudobility/music_types';
+import type {
+  PlaybackEngine,
+  PlaybackLoadState,
+  PlaybackObserver,
+  Score,
+  ScoreRange,
+} from '@sudobility/music_types';
 import { allocateChannels } from './channel-allocator.js';
 import type { ChannelAssignment } from './channel-allocator.js';
 import { PlaybackClock } from './clock.js';
@@ -23,6 +29,7 @@ import { scheduleClick } from './click.js';
 import { Governor } from './governor.js';
 import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
 import { loadSoundfont, openSoundfontCache } from './soundfont-loader.js';
+import type { LoadProgress } from './soundfont-loader.js';
 
 /** The slice of `SynthHost` this engine drives, so tests can pass a stub. */
 export type SynthHostLike = {
@@ -51,7 +58,7 @@ export type SoundfontEngineDeps = {
   host: SynthHostLike;
   moduleUrls: { fluidsynth: string; worklet: string };
   fontUrl: string;
-  loadFont?: (url: string) => Promise<ArrayBuffer>;
+  loadFont?: (url: string, onProgress?: (progress: LoadProgress) => void) => Promise<ArrayBuffer>;
   createContext?: () => AudioContext;
   /** Defaults to the audio context's own clock, which is what the audio is rendered against. */
   now?: () => number;
@@ -71,6 +78,20 @@ const POSITION_TICK_INTERVAL_MS = 1000 / 30;
 const CC_VOLUME = 7;
 const CC_PAN = 10;
 const MAX_CC = 127;
+/**
+ * How much of the progress bar the download accounts for.
+ *
+ * The rest is the synth digesting the font, which is the longer half and
+ * reports nothing. Measured at roughly five seconds against a download that is
+ * near-instant on a fast connection, so this is deliberately conservative — a
+ * bar that reaches the end and then waits is worse than one that stops early.
+ */
+const FETCH_SHARE = 0.5;
+
+/** Percent granularity: finer changes are not worth a store update. */
+function roughly(fraction: number | null): number | null {
+  return fraction === null ? null : Math.round(fraction * 100);
+}
 
 type TrackState = {
   assignment: ChannelAssignment;
@@ -102,6 +123,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   private initialized = false;
   /** In-flight bring-up, so concurrent callers share one attempt. */
   private initializing: Promise<void> | null = null;
+  private loadState: PlaybackLoadState = { status: 'idle' };
   /**
    * Where playback should begin once the pump actually runs.
    *
@@ -124,7 +146,10 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   constructor(deps: SoundfontEngineDeps) {
     this.deps = {
       ...deps,
-      loadFont: deps.loadFont ?? (async (url) => loadSoundfont(url, { cache: await openSoundfontCache() })),
+      loadFont:
+        deps.loadFont ??
+        (async (url, onProgress) =>
+          loadSoundfont(url, { cache: await openSoundfontCache(), onProgress })),
       startPump:
         deps.startPump ??
         ((tick, ms) => {
@@ -177,17 +202,48 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     await this.resumeContext();
     if (!this.contextCanRun()) return;
 
-    const soundfont = await this.deps.loadFont(this.deps.fontUrl);
-    await this.deps.host.init(this.context, {
-      fluidsynthModuleUrl: this.deps.moduleUrls.fluidsynth,
-      workletModuleUrl: this.deps.moduleUrls.worklet,
-      soundfont,
-      instanceCount: 1,
-    });
-    this.initialized = true;
-    // The score may have arrived while the context was still suspended; the
-    // host has not been told about it yet.
-    if (this.score) this.applyScoreToHost(this.score);
+    try {
+      this.reportLoad({ status: 'loading', fraction: 0 });
+      const soundfont = await this.deps.loadFont(this.deps.fontUrl, ({ loaded, total }) => {
+        // Fetching is the measurable half. Held below 1 so the bar does not sit
+        // at "done" through the seconds of decoding that follow.
+        this.reportLoad({ status: 'loading', fraction: total > 0 ? (loaded / total) * FETCH_SHARE : null });
+      });
+
+      // Handing the font to fluidsynth takes seconds and reports nothing along
+      // the way, so this is the honest answer: busy, no idea how long.
+      this.reportLoad({ status: 'loading', fraction: null });
+      await this.deps.host.init(this.context, {
+        fluidsynthModuleUrl: this.deps.moduleUrls.fluidsynth,
+        workletModuleUrl: this.deps.moduleUrls.worklet,
+        soundfont,
+        instanceCount: 1,
+      });
+      this.initialized = true;
+      // The score may have arrived while the context was still suspended; the
+      // host has not been told about it yet.
+      if (this.score) this.applyScoreToHost(this.score);
+      this.reportLoad({ status: 'ready' });
+    } catch (error) {
+      // Reported rather than swallowed: a font that will not load is the
+      // difference between silence-with-a-reason and silence.
+      this.reportLoad({ status: 'failed', message: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }
+
+  /** Only on change, so a progress stream does not become a store-update stream. */
+  private reportLoad(state: PlaybackLoadState): void {
+    if (
+      state.status === this.loadState.status &&
+      (state.status !== 'loading' ||
+        this.loadState.status !== 'loading' ||
+        roughly(state.fraction) === roughly(this.loadState.fraction))
+    ) {
+      return;
+    }
+    this.loadState = state;
+    this.observer?.onLoadStateChange?.(state);
   }
 
   /** Best effort: without a user gesture behind it this is allowed to fail. */
