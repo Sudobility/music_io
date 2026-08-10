@@ -7,6 +7,7 @@ import { SoundfontPlaybackEngine } from './soundfont-engine.js';
 function stubHost() {
   return {
     init: vi.fn(async () => {}),
+    ensureInstances: vi.fn(async () => {}),
     setChannelPercussion: vi.fn(),
     programSelect: vi.fn(),
     noteOn: vi.fn(),
@@ -211,24 +212,57 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
     return { engine, host, pump, release };
   }
 
-  it('reports playing at once, without waiting for the soundfont', async () => {
-    // The first press loads 23MB and hands it to fluidsynth. Waiting for that
-    // before reporting left the button dead for seconds with nothing happening,
-    // and under load the acceptance test gave up on it.
+  it('does not report playing until the synth can actually sound', async () => {
+    // This used to report "playing" immediately, so the button would not look
+    // dead through the 23MB first load. It made the transport lie, and the app
+    // believed it: the caret interpolates between the engine's 30Hz reports
+    // using elapsed real time, and no reports arrive while the font loads — so
+    // the caret glided silently through several bars, then snapped back when
+    // the music finally started from the beginning.
+    //
+    // The load indicator (`PlaybackLoadState`, reported below) is what fills
+    // that window now, which is what makes honest reporting affordable.
     const { engine, pump, release } = withPendingFont();
+    const states: string[] = [];
+    const loads: string[] = [];
+    engine.setObserver({
+      onPositionTick: () => {},
+      onActiveNotes: () => {},
+      onStateChange: (s) => states.push(s),
+      onLoadStateChange: (s) => loads.push(s.status),
+    });
+    await engine.loadScore(twoTrackScore());
+
+    const playing = engine.play();
+    expect(states).toEqual([]); // nothing is playing yet, and nothing claims to be
+    // The load is reported once the context is running, a microtask later.
+    await vi.waitFor(() => expect(loads).toContain('loading')); // the transport knows why
+    expect(states).toEqual([]); // and still says nothing about playing
+    expect(pump.running).toBe(false);
+
+    release();
+    await playing;
+    expect(states).toEqual(['playing']);
+    expect(pump.running).toBe(true);
+  });
+
+  it('reports playing on the spot once the synth is up', async () => {
+    // Only the first press waits. Every one after it must be immediate — a
+    // transport that lags a frame behind the button is its own bug.
+    const { engine, host, pump, score } = setup();
+    await engine.loadScore(score);
+    await engine.initialize();
+    expect(host.init).toHaveBeenCalled();
+
     const states: string[] = [];
     engine.setObserver({
       onPositionTick: () => {},
       onActiveNotes: () => {},
       onStateChange: (s) => states.push(s),
     });
-    await engine.loadScore(twoTrackScore());
 
     const playing = engine.play();
-    expect(states).toEqual(['playing']); // reported while the font is still loading
-    expect(pump.running).toBe(false); // but nothing is dispatched yet
-
-    release();
+    expect(states).toEqual(['playing']); // synchronously, before the promise settles
     await playing;
     expect(pump.running).toBe(true);
   });

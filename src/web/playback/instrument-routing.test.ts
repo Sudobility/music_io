@@ -1,0 +1,143 @@
+/**
+ * Which synth, which channel and which program each track ends up on.
+ *
+ * Every case here is a fault that was silent by construction: the transport
+ * ran, the notes were dispatched, and either nothing came out or the wrong
+ * instrument did. The unit under test is therefore always "what was the host
+ * told", because that is the last point before the audio thread where a
+ * misrouted instrument is still observable.
+ */
+import { describe, expect, it, vi } from 'vitest';
+import type { Score } from '@sudobility/music_types';
+import { SoundfontPlaybackEngine } from './soundfont-engine.js';
+import { allocateChannels } from './channel-allocator.js';
+
+function stubHost() {
+  return {
+    init: vi.fn(async (_context: BaseAudioContext, _options: { instanceCount: number }) => {}),
+    ensureInstances: vi.fn(async () => {}),
+    setChannelPercussion: vi.fn(),
+    programSelect: vi.fn(),
+    noteOn: vi.fn(),
+    noteOff: vi.fn(),
+    controlChange: vi.fn(),
+    allSoundOff: vi.fn(),
+    setInterpolation: vi.fn(),
+    setMasterVolume: vi.fn(),
+    setTrackCount: vi.fn(),
+    dispose: vi.fn(),
+  };
+}
+
+function stubContext() {
+  const node = () => ({ connect: vi.fn(), disconnect: vi.fn() });
+  return {
+    sampleRate: 44100,
+    currentTime: 0,
+    destination: node(),
+    close: vi.fn(),
+    createGain: vi.fn(() => ({ ...node(), gain: { value: 1 } })),
+  } as unknown as AudioContext;
+}
+
+function engineWith() {
+  const host = stubHost();
+  const engine = new SoundfontPlaybackEngine({
+    host,
+    moduleUrls: { fluidsynth: 'f.js', worklet: 'w.js' },
+    fontUrl: 'font.sf3',
+    loadFont: async () => new Uint8Array(4).buffer,
+    createContext: () => stubContext(),
+    now: () => 0,
+    startPump: () => () => {},
+  });
+  return { host, engine };
+}
+
+function scoreOfTracks(count: number, clef: 'treble' | 'percussion' = 'treble'): Score {
+  return {
+    id: 's',
+    title: 't',
+    ppq: 480,
+    tempoMap: [{ tick: 0, bpm: 120 }],
+    tracks: Array.from({ length: count }, (_, i) => ({
+      id: `t${i}`,
+      name: `t${i}`,
+      instrumentName: 'x',
+      midiProgram: i,
+      midiChannel: 0,
+      clef,
+      volume: 1,
+      pan: 0,
+      muted: false,
+      solo: false,
+      measures: [],
+    })),
+  } as unknown as Score;
+}
+
+describe('instrument routing', () => {
+  it('opens as many synths as the allocation needs, not always one', async () => {
+    // Sixteen channels per synth and channel 9 barred to pitched parts, so a
+    // seventeen-part score puts tracks on instance 1. Initialising with one
+    // synth left those tracks addressing `synths[1]`, which does not exist —
+    // they played nothing at all, with no error anywhere.
+    const { host, engine } = engineWith();
+    const score = scoreOfTracks(17);
+    await engine.loadScore(score);
+    await engine.initialize();
+
+    const { instanceCount } = allocateChannels(
+      score.tracks.map((t) => ({ id: t.id, isPercussion: false })),
+    );
+    expect(instanceCount).toBe(2);
+    expect(host.init.mock.calls[0][1].instanceCount).toBe(2);
+  });
+
+  it('grows the host when a bigger score is loaded after start-up', async () => {
+    const { host, engine } = engineWith();
+    await engine.loadScore(scoreOfTracks(2));
+    await engine.initialize();
+    expect(host.init.mock.calls[0][1].instanceCount).toBe(1);
+
+    await engine.loadScore(scoreOfTracks(17));
+    expect(host.ensureInstances).toHaveBeenCalledWith(2);
+  });
+
+  it('auditions on a channel no track owns', async () => {
+    // Channel 15 was hard-coded, and a fifteen-part score owns it: tapping a
+    // key selected the audition's program on a real track, which then played
+    // the wrong instrument until the next edit reloaded the score.
+    const { host, engine } = engineWith();
+    const score = scoreOfTracks(16);
+    await engine.loadScore(score);
+    await engine.initialize();
+
+    const { assignments } = allocateChannels(
+      score.tracks.map((t) => ({ id: t.id, isPercussion: false })),
+    );
+    const owned = new Set([...assignments.values()].map((a) => `${a.instance}:${a.channel}`));
+
+    host.programSelect.mockClear();
+    engine.noteOn(60, 12, false);
+    const [instance, channel] = host.programSelect.mock.calls[0];
+    expect(owned.has(`${instance}:${channel}`)).toBe(false);
+    expect(host.noteOn).toHaveBeenCalledWith(instance, channel, 60, expect.any(Number));
+  });
+
+  it('auditions a percussion track on its own kit rather than channel 9', async () => {
+    // Channel 9 belongs to the drum track itself, so the audition inherited
+    // that channel's volume — a muted drum track made the keyboard silent —
+    // and ignored the kit, sounding Standard for a track playing TR-808.
+    const { host, engine } = engineWith();
+    await engine.loadScore(scoreOfTracks(1, 'percussion'));
+    await engine.initialize();
+
+    host.setChannelPercussion.mockClear();
+    engine.noteOn(38, 25, true);
+    const [instance, channel, kit] = host.setChannelPercussion.mock.calls[0];
+    expect(kit).toBe(25);
+    expect(channel).not.toBe(9);
+    expect(host.noteOn).toHaveBeenCalledWith(instance, channel, 38, expect.any(Number));
+  });
+});

@@ -42,6 +42,7 @@ export type SynthHostLike = {
       instanceCount: number;
     },
   ): Promise<void>;
+  ensureInstances(count: number): Promise<void>;
   setChannelPercussion(instance: number, channel: number, kit?: number): void;
   programSelect(instance: number, channel: number, program: number): void;
   noteOn(instance: number, channel: number, midi: number, velocity: number): void;
@@ -78,6 +79,9 @@ const POSITION_TICK_INTERVAL_MS = 1000 / 30;
 const CC_VOLUME = 7;
 const CC_PAN = 10;
 const MAX_CC = 127;
+const CHANNELS_PER_INSTANCE = 16;
+/** General MIDI's drum channel, which an audition must not borrow. */
+const GM_PERCUSSION_CHANNEL = 9;
 /**
  * How much of the progress bar the download accounts for.
  *
@@ -146,6 +150,17 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   private clickCursor = 0;
   /** Audition voices are held on their own channel so they never disturb a track. */
   private auditionHeld = new Map<number, ChannelAssignment>();
+  /** How many synths the current score's channel assignment needs. */
+  private instanceCount = 1;
+  /**
+   * The channel auditions borrow — recomputed per score so it is one no track owns.
+   *
+   * It used to be channel 15 flat. That channel belongs to a track on any score
+   * with fifteen pitched parts, so tapping a key selected the audition's program
+   * on it and left that part playing the wrong instrument until the next edit
+   * reloaded the score.
+   */
+  private auditionChannel: ChannelAssignment = { instance: 0, channel: 15, needsDrumTypeSwitch: false };
 
   constructor(deps: SoundfontEngineDeps) {
     this.deps = {
@@ -221,7 +236,10 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
         fluidsynthModuleUrl: this.deps.moduleUrls.fluidsynth,
         workletModuleUrl: this.deps.moduleUrls.worklet,
         soundfont,
-        instanceCount: 1,
+        // What the score already loaded needs, not a fixed one: a score with
+        // more parts than a single synth can address puts tracks on instance 1,
+        // and a synth that was never opened plays them silently.
+        instanceCount: this.instanceCount,
       });
       this.initialized = true;
       // The score may have arrived while the context was still suspended; the
@@ -274,9 +292,10 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.clicks = metronomeClicks(score);
     this.clickCursor = 0;
 
-    const { assignments } = allocateChannels(
+    const { assignments, instanceCount } = allocateChannels(
       score.tracks.map((t) => ({ id: t.id, isPercussion: t.clef === 'percussion' })),
     );
+    this.instanceCount = instanceCount;
 
     this.tracks = new Map();
     for (const track of score.tracks) {
@@ -284,11 +303,43 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
       if (!assignment) continue;
       this.tracks.set(track.id, { assignment, volume: track.volume, muted: track.muted, solo: track.solo });
     }
+    this.auditionChannel = this.pickAuditionChannel();
 
     // Only once there is a synth to tell. Before the fix above this ran inline,
     // which is what dragged the whole synth bring-up into score loading.
-    if (this.initialized) this.applyScoreToHost(score);
-    else void this.initialize();
+    if (this.initialized) {
+      // A score can grow past what the open synths can address, and the tracks
+      // beyond them are silent until this resolves.
+      await this.deps.host.ensureInstances(this.instanceCount);
+      this.applyScoreToHost(score);
+    } else void this.initialize();
+  }
+
+  /**
+   * A channel no track owns, searched from the top down because tracks fill
+   * from the bottom.
+   *
+   * Channel 9 is skipped: it is General MIDI's drum channel, so borrowing it
+   * would make every audition a drum hit. Percussion auditions get their drum
+   * type switched on instead, which is the same route a second drum track takes.
+   *
+   * Where a score owns every channel of every open instance there is nothing to
+   * borrow, and it falls back to sharing the last one — an audition that
+   * disturbs one track's program beats a keyboard that makes no sound.
+   */
+  private pickAuditionChannel(): ChannelAssignment {
+    const owned = new Set(
+      [...this.tracks.values()].map((t) => `${t.assignment.instance}:${t.assignment.channel}`),
+    );
+    for (let instance = 0; instance < this.instanceCount; instance += 1) {
+      for (let channel = CHANNELS_PER_INSTANCE - 1; channel >= 0; channel -= 1) {
+        if (channel === GM_PERCUSSION_CHANNEL) continue;
+        if (!owned.has(`${instance}:${channel}`)) {
+          return { instance, channel, needsDrumTypeSwitch: false };
+        }
+      }
+    }
+    return { instance: 0, channel: CHANNELS_PER_INSTANCE - 1, needsDrumTypeSwitch: false };
   }
 
   /** Tells the host each track's program, percussion flag, pan and level. */
@@ -324,30 +375,44 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   }
 
   /**
-   * Starts the transport, reporting it before waiting for the synth.
+   * Starts the transport — reporting "playing" only once it is true.
    *
    * The first press of Play has to load a 23MB soundfont and hand it to
-   * fluidsynth, which takes seconds. Waiting for that before saying "playing"
-   * left the button dead and the transport unchanged for the whole load, with
-   * nothing to indicate anything was happening — and under load it was slow
-   * enough that the acceptance test gave up on it.
+   * fluidsynth, which takes seconds. This used to report "playing" up front so
+   * the button would not look dead through that wait, on the reasoning that it
+   * cost nothing in accuracy: the clock does not start until the pump's first
+   * tick, so no part of the piece is skipped however long the load takes.
    *
-   * Reporting first costs nothing in accuracy. The clock does not start until
-   * the pump's first tick (see `startAtSeconds`), so the position stays at the
-   * beginning and no part of the piece is skipped however long the wait was —
-   * that behaviour already exists precisely because the first tick can be late.
+   * It cost something in accuracy elsewhere. The **caret** does not follow the
+   * engine's position while playing — it interpolates, dead-reckoning from the
+   * last 30Hz report with elapsed real time, because those reports arrive in
+   * clumps. During the load there are no reports at all, so the caret projected
+   * forward from a standing start and glided silently through several bars,
+   * then snapped back when the music finally began at the beginning. Two
+   * separately-sound optimisations that could not both be right.
+   *
+   * So the transport now says what is true, and `PlaybackLoadState` — which the
+   * bar renders as "Preparing instruments 45%" — says why the wait is happening.
+   * That indicator did not exist when the early report was written; it is what
+   * makes honesty affordable here.
+   *
+   * Only a cold engine waits. Once the synth is up this reports synchronously,
+   * which is every press after the first.
    */
   async play(fromTick?: number): Promise<void> {
     if (!this.score) return;
     if (fromTick !== undefined) this.seek(fromTick);
     this.startAtSeconds = this.clock.positionSeconds;
     this.nextPumpDueAt = null;
-    this.observer?.onStateChange('playing');
+
+    const ready = this.initialized;
+    if (ready) this.observer?.onStateChange('playing');
 
     await this.initialize();
     // Pausing or stopping during the load clears this, and is the user
     // changing their mind: do not start playing underneath them.
     if (!this.initialized || this.startAtSeconds === null) return;
+    if (!ready) this.observer?.onStateChange('playing');
     this.startPump();
   }
 
@@ -432,12 +497,17 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     // yet, and the alternative is a keyboard that does nothing at all.
     if (!this.initialized) void this.initialize();
 
-    // Auditioning must not disturb the transport, so it borrows a channel
-    // rather than routing through a track's.
-    const assignment: ChannelAssignment = isPercussion
-      ? { instance: 0, channel: 9, needsDrumTypeSwitch: false }
-      : { instance: 0, channel: 15, needsDrumTypeSwitch: false };
-    if (!isPercussion) this.deps.host.programSelect(assignment.instance, assignment.channel, program);
+    // Auditioning must not disturb the transport, so it borrows a channel no
+    // track owns rather than routing through a track's.
+    const assignment = this.auditionChannel;
+    if (isPercussion) {
+      // `program` is the kit on a percussion track, so this sounds the kit the
+      // track actually plays rather than whatever Standard the channel had.
+      this.deps.host.setChannelPercussion(assignment.instance, assignment.channel, program);
+    } else {
+      // Switches the channel back off drums first, if the last audition was one.
+      this.deps.host.programSelect(assignment.instance, assignment.channel, program);
+    }
     this.deps.host.noteOn(assignment.instance, assignment.channel, midi, 100);
     this.auditionHeld.set(midi, assignment);
   }

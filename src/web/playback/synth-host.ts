@@ -48,6 +48,8 @@ const RENDER_BUFFER_SIZE = 8192;
 const DRUM_BANK = 128;
 /** The kit channel 9 defaults to, so a switched channel matches it. */
 const STANDARD_KIT = 0;
+/** The one channel General MIDI reserves for drums, and the one that may never go melodic. */
+const PERCUSSION_CHANNEL = 9;
 
 export class SynthHost {
   private synths: SynthInstance[] = [];
@@ -57,6 +59,13 @@ export class SynthHost {
   private master: GainNode | null = null;
   private masterVolume = 1;
   private trackCount = 1;
+  /** Kept so instances can be added later; see `ensureInstances`. */
+  private context: BaseAudioContext | null = null;
+  private soundfont: ArrayBuffer | null = null;
+  /** The governor's current setting, so an instance opened later starts where the others are. */
+  private interpolation: number | null = null;
+  /** Serialises growth, so two scores loading at once cannot both build instance 1. */
+  private growing: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly deps: {
@@ -95,15 +104,44 @@ export class SynthHost {
     master.connect(limiter);
     limiter.connect(context.destination);
     this.master = master;
+    this.context = context;
+    this.soundfont = options.soundfont;
 
-    for (let i = 0; i < options.instanceCount; i += 1) {
+    await this.ensureInstances(options.instanceCount);
+    this.applyMasterGain();
+  }
+
+  /**
+   * Opens instances until there are at least `count` of them.
+   *
+   * Scores outgrow sixteen channels, and which channel a track lands on is
+   * decided per score — so the number of synths needed is not known at init
+   * time. Growing here rather than sizing up front is what keeps the common
+   * case cheap: every extra instance is another copy of the font in WASM
+   * memory and seconds of loading, so one is opened only when a score genuinely
+   * has more parts than one synth can address. Without this, a track allocated
+   * to instance 1 reached `synths[1]`, found nothing, and played silently — no
+   * error, no missing note, just a part that was not there.
+   */
+  ensureInstances(count: number): Promise<void> {
+    this.growing = this.growing.then(() => this.grow(count));
+    return this.growing;
+  }
+
+  private async grow(count: number): Promise<void> {
+    const context = this.context;
+    const soundfont = this.soundfont;
+    // Before `init`, so there is nothing to build on yet; `init` sizes it.
+    if (!context || !soundfont || !this.master) return;
+    for (let i = this.synths.length; i < count; i += 1) {
       const synth = await this.deps.createSynth();
       synth.init(context.sampleRate);
-      synth.createAudioNode(context, RENDER_BUFFER_SIZE).connect(master);
-      this.sfontIds[i] = await synth.loadSFont(options.soundfont);
+      synth.createAudioNode(context, RENDER_BUFFER_SIZE).connect(this.master);
+      this.sfontIds[i] = await synth.loadSFont(soundfont);
+      // The governor speaks for every instance, and it may already have spoken.
+      if (this.interpolation !== null) synth.setInterpolation(this.interpolation);
       this.synths[i] = synth;
     }
-    this.applyMasterGain();
   }
 
   /**
@@ -147,15 +185,26 @@ export class SynthHost {
   }
 
   /**
-   * Selects a GM program — **never on a percussion channel**.
+   * Selects a GM program — **never on channel 9**.
    *
-   * The spike measured this directly: selecting a program on channel 9
+   * The spike measured this directly: selecting a melodic program on channel 9
    * replaces fluidsynth's working default with a preset that is not at that
    * address, and the channel goes silent. Every explicit selection route gave
    * peak 0.0000; leaving it alone gave 0.3120. This guard is why drums sound.
+   *
+   * Any *other* channel that was made percussion is switched back rather than
+   * refused. Channel assignment is per score, so the channel a second drum
+   * track borrowed is handed to a pitched track by the next score that has one
+   * fewer kit — and refusing here left that track playing congas under a violin
+   * label, permanently, because nothing ever cleared the flag. Switching the
+   * type back before the select is exactly what the offline renderer already
+   * does for the same situation.
    */
   programSelect(instance: number, channel: number, program: number): void {
-    if (this.percussionChannels.has(`${instance}:${channel}`)) return;
+    if (channel === PERCUSSION_CHANNEL) return;
+    if (this.percussionChannels.delete(`${instance}:${channel}`)) {
+      this.synths[instance]?.midiSetChannelType(channel, false);
+    }
     this.synths[instance]?.midiProgramSelect(channel, this.sfontIds[instance], 0, program);
   }
 
@@ -178,6 +227,7 @@ export class SynthHost {
 
   /** The governor's one confirmed knob; applies to every instance at once. */
   setInterpolation(order: number): void {
+    this.interpolation = order;
     for (const synth of this.synths) synth.setInterpolation(order);
   }
 
@@ -202,5 +252,7 @@ export class SynthHost {
     this.sfontIds = [];
     this.percussionChannels.clear();
     this.master = null;
+    this.context = null;
+    this.soundfont = null;
   }
 }

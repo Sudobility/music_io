@@ -166,6 +166,41 @@ describe('createSoundfontRenderer', () => {
     expect(synth.calls.midiAllSoundsOff?.length).toBe(2);
   });
 
+  it('renders a score too big for one synth as several summed passes', async () => {
+    // One offline synth addresses sixteen channels; the allocator spreads a
+    // bigger score over more. Keying on the channel alone and ignoring the
+    // instance put two tracks on one channel — the second overwrote the
+    // first's program — so past sixteen parts the export came out with the
+    // wrong instruments while playback, which opens the extra synths, did not.
+    // Asserting on what each *note* was sounding with, not on what was
+    // selected: with the tracks collapsed onto one instance every program is
+    // still selected, it is just overwritten before the note that needed it.
+    const synth = stubSynth();
+    const programOn = new Map<number, number>();
+    const sounded: number[] = [];
+    synth.midiProgramSelect = (channel, _sfont, _bank, preset) => programOn.set(channel, preset);
+    synth.midiNoteOn = (channel) => sounded.push(programOn.get(channel) ?? -1);
+
+    const tracks = Array.from({ length: 17 }, (_, i) =>
+      track({ id: `t${i}`, midiProgram: i, isPercussion: false }),
+    );
+    await rendererFor(synth)(
+      plan({
+        tracks,
+        events: tracks.map((t) => ({
+          trackId: t.id,
+          midi: 60,
+          startSec: 0,
+          durationSec: 0.25,
+          velocity: 0.8,
+        })),
+      }),
+    );
+
+    // Every track sounded, each with its own instrument.
+    expect(sounded.slice().sort((a, b) => a - b)).toEqual(tracks.map((t) => t.midiProgram));
+  });
+
   it('reuses the synth across renders rather than reloading the soundfont', async () => {
     // The reason this rewrite exists: the previous design built a fresh
     // worklet and reloaded a 23MB font on every single export.

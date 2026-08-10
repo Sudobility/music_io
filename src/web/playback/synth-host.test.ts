@@ -90,6 +90,45 @@ describe('SynthHost', () => {
     expect(synths[0].calls.midiProgramSelect).toEqual([[9, 1, 128, 0]]);
   });
 
+  it('hands a borrowed drum channel back when a pitched track takes it', async () => {
+    // Channels are allocated per score, so the channel a second drum track
+    // borrowed goes to a pitched track on the next score with one fewer kit.
+    // Refusing the select there left that track playing congas under a violin
+    // label, for good — nothing ever cleared the flag.
+    const { host, synths } = await hostWith(1);
+    host.setChannelPercussion(0, 3);
+    synths[0].calls.midiProgramSelect = [];
+    synths[0].calls.midiSetChannelType = [];
+
+    host.programSelect(0, 3, 40);
+    expect(synths[0].calls.midiSetChannelType).toEqual([[3, false]]);
+    expect(synths[0].calls.midiProgramSelect).toEqual([[3, 1, 0, 40]]);
+  });
+
+  it('opens further instances on demand, at the interpolation the others are on', async () => {
+    // How many synths a score needs is not known until it is loaded, and a
+    // track assigned to an instance that was never opened plays silently.
+    const synths = [stubSynth(), stubSynth()];
+    let made = 0;
+    const host = new SynthHost({ createSynth: () => synths[made++] });
+    await host.init(stubContext(), {
+      fluidsynthModuleUrl: 'fluid.js',
+      workletModuleUrl: 'worklet.js',
+      soundfont: new Uint8Array(4).buffer,
+      instanceCount: 1,
+    });
+    host.setInterpolation(4);
+
+    await host.ensureInstances(2);
+    host.noteOn(1, 4, 60, 100);
+    expect(synths[1].calls.midiNoteOn?.[0]).toEqual([4, 60, 100]);
+    expect(synths[1].calls.setInterpolation?.[0]).toEqual([4]);
+
+    // Idempotent: asking again must not build a third.
+    await host.ensureInstances(2);
+    expect(made).toBe(2);
+  });
+
   it('does select a program on an ordinary channel', async () => {
     const { host, synths } = await hostWith(1);
     host.programSelect(0, 3, 42);
