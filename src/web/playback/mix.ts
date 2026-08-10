@@ -1,6 +1,6 @@
 /**
  * The master-bus rules, shared by live playback (`tone-engine.ts`) and offline
- * export (`../audio/render.ts`).
+ * export (`../audio/soundfont-render.ts`).
  *
  * They live here rather than in either caller because an export that mixed
  * differently from playback is exactly the bug this module exists to prevent:
