@@ -20,6 +20,7 @@ import { PlaybackClock } from './clock.js';
 import { NoteQueue } from './note-queue.js';
 import { planDispatch } from './pump-window.js';
 import { scheduleClick } from './click.js';
+import { Governor } from './governor.js';
 import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
 import { loadSoundfont } from './soundfont-loader.js';
 
@@ -82,6 +83,9 @@ type PendingOff = { atSeconds: number; assignment: ChannelAssignment; midi: numb
 
 export class SoundfontPlaybackEngine implements PlaybackEngine {
   private readonly queue = new NoteQueue();
+  private readonly governor: Governor;
+  /** When the pump was last expected to run, for measuring how late it is. */
+  private nextPumpDueAt: number | null = null;
   private readonly clock: PlaybackClock;
   private readonly deps: Required<Pick<SoundfontEngineDeps, 'loadFont' | 'startPump'>> & SoundfontEngineDeps;
 
@@ -127,6 +131,9 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
         }),
     };
     this.clock = new PlaybackClock(() => this.now());
+    // The governor's only knob is interpolation order; see governor.ts for why
+    // polyphony is not a second rung.
+    this.governor = new Governor({ onChange: (order) => this.deps.host.setInterpolation(order) });
   }
 
   private now(): number {
@@ -198,6 +205,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     await this.initialize();
     if (fromTick !== undefined) this.seek(fromTick);
     this.startAtSeconds = this.clock.positionSeconds;
+    this.nextPumpDueAt = null;
     this.startPump();
     this.observer?.onStateChange('playing');
   }
@@ -308,6 +316,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   }
 
   private tick(): void {
+    this.measureLateness();
     if (this.startAtSeconds !== null) {
       this.clock.start(this.startAtSeconds);
       this.startAtSeconds = null;
@@ -342,6 +351,21 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.pumpMetronome(position, untilSeconds);
     this.report(position);
     if (this.queue.exhausted && this.pendingOffs.length === 0 && this.clock.isRunning) this.stop();
+  }
+
+  /**
+   * How late this frame ran against when it was due.
+   *
+   * Measured on the audio clock rather than wall time, because that is the
+   * clock the audio is rendered against and the one that matters if the thread
+   * is being starved.
+   */
+  private measureLateness(): void {
+    const now = this.now();
+    const expected = this.nextPumpDueAt;
+    this.nextPumpDueAt = now + PUMP_INTERVAL_MS / 1000;
+    if (expected === null) return; // first frame has nothing to be late against
+    this.governor.record(Math.max(0, now - expected));
   }
 
   /**
