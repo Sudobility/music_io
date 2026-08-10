@@ -100,6 +100,8 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   private loopRange: ScoreRange | null = null;
   private lastReportedAt = 0;
   private initialized = false;
+  /** In-flight bring-up, so concurrent callers share one attempt. */
+  private initializing: Promise<void> | null = null;
   /**
    * Where playback should begin once the pump actually runs.
    *
@@ -145,9 +147,36 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     return this.tempoMap.ticksToSeconds(tick);
   }
 
+  /**
+   * Brings up the audio context and the synth, once.
+   *
+   * Resuming comes first, and the guard after it is the whole point. A browser
+   * starts an `AudioContext` **suspended** unless it was created during a user
+   * gesture, and a suspended context never runs its `AudioWorklet`. The synth's
+   * font load round-trips through that worklet, so attempting it on a suspended
+   * context does not fail — it simply never returns. That is what happened:
+   * `loadScore` ran at score-load time, long before any click, and left a
+   * promise pending for good. Every later `play()` awaited the same promise,
+   * so the transport sat at "stopped" with nothing in the console to explain it.
+   *
+   * So when the context cannot be got running, this does the cheap part and
+   * returns. `play()` and `noteOn()` are user gestures and will get it running.
+   */
   async initialize(): Promise<void> {
+    this.initializing ??= this.bringUp().finally(() => {
+      // Cleared either way: a failed or deferred attempt must be retryable from
+      // the next gesture rather than cached as the answer forever.
+      this.initializing = null;
+    });
+    return this.initializing;
+  }
+
+  private async bringUp(): Promise<void> {
     if (this.initialized) return;
-    this.context = this.deps.createContext?.() ?? new AudioContext();
+    this.context ??= this.deps.createContext?.() ?? new AudioContext();
+    await this.resumeContext();
+    if (!this.contextCanRun()) return;
+
     const soundfont = await this.deps.loadFont(this.deps.fontUrl);
     await this.deps.host.init(this.context, {
       fluidsynthModuleUrl: this.deps.moduleUrls.fluidsynth,
@@ -156,10 +185,29 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
       instanceCount: 1,
     });
     this.initialized = true;
+    // The score may have arrived while the context was still suspended; the
+    // host has not been told about it yet.
+    if (this.score) this.applyScoreToHost(this.score);
+  }
+
+  /** Best effort: without a user gesture behind it this is allowed to fail. */
+  private async resumeContext(): Promise<void> {
+    const context = this.context as { state?: string; resume?: () => Promise<void> } | undefined;
+    if (!context?.resume || context.state === 'running') return;
+    try {
+      await context.resume();
+    } catch {
+      // No gesture yet. `contextCanRun` will see it and defer the rest.
+    }
+  }
+
+  /** A stub context in a test has no `state`; only a real suspended one blocks. */
+  private contextCanRun(): boolean {
+    const state = (this.context as { state?: string } | undefined)?.state;
+    return state === undefined || state === 'running';
   }
 
   async loadScore(score: Score): Promise<void> {
-    await this.initialize();
     this.score = score;
     this.tempoMap = new TempoMap(score.tempoMap, score.ppq);
     this.queue.load(flattenScoreForPlayback(score));
@@ -175,6 +223,19 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
       const assignment = assignments.get(track.id);
       if (!assignment) continue;
       this.tracks.set(track.id, { assignment, volume: track.volume, muted: track.muted, solo: track.solo });
+    }
+
+    // Only once there is a synth to tell. Before the fix above this ran inline,
+    // which is what dragged the whole synth bring-up into score loading.
+    if (this.initialized) this.applyScoreToHost(score);
+    else void this.initialize();
+  }
+
+  /** Tells the host each track's program, percussion flag, pan and level. */
+  private applyScoreToHost(score: Score): void {
+    for (const track of score.tracks) {
+      const assignment = this.tracks.get(track.id)?.assignment;
+      if (!assignment) continue;
 
       if (assignment.needsDrumTypeSwitch || track.clef === 'percussion') {
         this.deps.host.setChannelPercussion(assignment.instance, assignment.channel);
@@ -200,14 +261,32 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     }
   }
 
+  /**
+   * Starts the transport, reporting it before waiting for the synth.
+   *
+   * The first press of Play has to load a 23MB soundfont and hand it to
+   * fluidsynth, which takes seconds. Waiting for that before saying "playing"
+   * left the button dead and the transport unchanged for the whole load, with
+   * nothing to indicate anything was happening — and under load it was slow
+   * enough that the acceptance test gave up on it.
+   *
+   * Reporting first costs nothing in accuracy. The clock does not start until
+   * the pump's first tick (see `startAtSeconds`), so the position stays at the
+   * beginning and no part of the piece is skipped however long the wait was —
+   * that behaviour already exists precisely because the first tick can be late.
+   */
   async play(fromTick?: number): Promise<void> {
     if (!this.score) return;
-    await this.initialize();
     if (fromTick !== undefined) this.seek(fromTick);
     this.startAtSeconds = this.clock.positionSeconds;
     this.nextPumpDueAt = null;
-    this.startPump();
     this.observer?.onStateChange('playing');
+
+    await this.initialize();
+    // Pausing or stopping during the load clears this, and is the user
+    // changing their mind: do not start playing underneath them.
+    if (!this.initialized || this.startAtSeconds === null) return;
+    this.startPump();
   }
 
   pause(): void {
@@ -285,6 +364,12 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   }
 
   noteOn(midi: number, program: number, isPercussion = false): void {
+    // Tapping a key is a user gesture, so it is also a chance to get the synth
+    // up — otherwise the keyboard stays silent until the first press of Play.
+    // The tap that starts the load does not sound; there is nothing to sound on
+    // yet, and the alternative is a keyboard that does nothing at all.
+    if (!this.initialized) void this.initialize();
+
     // Auditioning must not disturb the transport, so it borrows a channel
     // rather than routing through a track's.
     const assignment: ChannelAssignment = isPercussion

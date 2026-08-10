@@ -57,7 +57,7 @@ function manualPump() {
   };
 }
 
-function setup(score?: Score) {
+function setup(score?: Score, createContext: () => AudioContext = () => stubContext()) {
   const host = stubHost();
   const pump = manualPump();
   const clock = { t: 0 };
@@ -66,7 +66,7 @@ function setup(score?: Score) {
     moduleUrls: { fluidsynth: 'f.js', worklet: 'w.js' },
     fontUrl: 'font.sf3',
     loadFont: async () => new Uint8Array(4).buffer,
-      createContext: () => stubContext(),
+    createContext,
     now: () => clock.t,
     startPump: pump.start,
   });
@@ -139,6 +139,130 @@ describe('SoundfontPlaybackEngine: mixing', () => {
     const cc7 = host.controlChange.mock.calls.filter((c) => c[2] === 7);
     expect(cc7.some((c) => c[3] === 0)).toBe(true); // the non-soloed one
     expect(cc7.some((c) => c[3] > 0)).toBe(true); // the soloed one
+  });
+});
+
+describe('SoundfontPlaybackEngine: bringing the synth up', () => {
+  /** A context that starts suspended, as a browser gives you without a gesture. */
+  function suspendableContext(): Record<string, unknown> {
+    const base = stubContext() as unknown as Record<string, unknown>;
+    base.state = 'suspended';
+    base.resume = vi.fn(async () => {
+      base.state = 'running';
+    });
+    return base;
+  }
+
+  it('does not touch the synth while the context is suspended', async () => {
+    // A suspended context never runs its AudioWorklet, and the synth's font
+    // load round-trips through it — so this would not fail, it would hang for
+    // good, leaving the transport stuck at "stopped" with a clean console.
+    const context = stubContext() as unknown as Record<string, unknown>;
+    context.state = 'suspended';
+    const { engine, host, score } = setup(undefined, () => context as never);
+    await engine.initialize();
+    await engine.loadScore(score);
+    expect(host.init).not.toHaveBeenCalled();
+  });
+
+  it('resumes the context and brings the synth up when play is pressed', async () => {
+    // Play is a user gesture, which is what makes resuming allowed.
+    const context = suspendableContext();
+    const { engine, host, score } = setup(undefined, () => context as never);
+    await engine.loadScore(score);
+    expect(host.init).not.toHaveBeenCalled();
+
+    await engine.play();
+    expect(context.resume as ReturnType<typeof vi.fn>).toHaveBeenCalled();
+    expect(host.init).toHaveBeenCalled();
+  });
+
+  it('tells the host about a score that arrived before the synth existed', async () => {
+    // loadScore no longer waits for the synth, so the programs and levels it
+    // would have sent have to be sent once there is something to send them to.
+    const context = suspendableContext();
+    const { engine, host, score } = setup(undefined, () => context as never);
+    await engine.loadScore(score);
+    expect(host.programSelect).not.toHaveBeenCalled();
+
+    await engine.play();
+    expect(host.programSelect).toHaveBeenCalled();
+    expect(host.setTrackCount).toHaveBeenCalledWith(score.tracks.length);
+  });
+
+  /** An engine whose soundfont does not arrive until the returned `release` is called. */
+  function withPendingFont() {
+    let release!: () => void;
+    const font = new Promise<ArrayBuffer>((resolve) => {
+      release = () => resolve(new Uint8Array(4).buffer);
+    });
+    const host = stubHost();
+    const pump = manualPump();
+    const context = suspendableContext();
+    const engine = new SoundfontPlaybackEngine({
+      host,
+      moduleUrls: { fluidsynth: 'f.js', worklet: 'w.js' },
+      fontUrl: 'font.sf3',
+      loadFont: () => font,
+      createContext: () => context as never,
+      now: () => 0,
+      startPump: pump.start,
+    });
+    return { engine, host, pump, release };
+  }
+
+  it('reports playing at once, without waiting for the soundfont', async () => {
+    // The first press loads 23MB and hands it to fluidsynth. Waiting for that
+    // before reporting left the button dead for seconds with nothing happening,
+    // and under load the acceptance test gave up on it.
+    const { engine, pump, release } = withPendingFont();
+    const states: string[] = [];
+    engine.setObserver({
+      onPositionTick: () => {},
+      onActiveNotes: () => {},
+      onStateChange: (s) => states.push(s),
+    });
+    await engine.loadScore(twoTrackScore());
+
+    const playing = engine.play();
+    expect(states).toEqual(['playing']); // reported while the font is still loading
+    expect(pump.running).toBe(false); // but nothing is dispatched yet
+
+    release();
+    await playing;
+    expect(pump.running).toBe(true);
+  });
+
+  it('does not start playing if the user pauses while the synth loads', async () => {
+    const { engine, pump, release } = withPendingFont();
+    await engine.loadScore(twoTrackScore());
+
+    const playing = engine.play();
+    engine.pause();
+    release();
+    await playing;
+    expect(pump.running).toBe(false);
+  });
+
+  it('brings the synth up only once for concurrent callers', async () => {
+    const { engine, host, score } = setup();
+    await Promise.all([engine.initialize(), engine.initialize(), engine.loadScore(score)]);
+    expect(host.init).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries after a deferred attempt rather than caching it forever', async () => {
+    const context = stubContext() as unknown as Record<string, unknown>;
+    context.state = 'suspended';
+    context.resume = vi.fn(async () => {});
+    const { engine, host } = setup(undefined, () => context as never);
+    await engine.initialize();
+    expect(host.init).not.toHaveBeenCalled();
+
+    context.resume = vi.fn(async () => {
+      context.state = 'running';
+    });
+    await engine.initialize();
+    expect(host.init).toHaveBeenCalled();
   });
 });
 
