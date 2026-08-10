@@ -232,12 +232,26 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   }
 
   seek(tick: number): void {
-    this.clock.seek(this.secondsForTick(tick));
+    const seconds = this.secondsForTick(tick);
+    this.clock.seek(seconds);
     this.queue.seekToTick(tick);
     this.clickCursor = this.clicks.findIndex((c) => c.tick >= tick);
     if (this.clickCursor < 0) this.clickCursor = this.clicks.length;
     this.deps.host.allSoundOff();
     this.clearSounding();
+
+    // Report where we landed. Nothing else writes the store's position —
+    // `PlaybackController.seek` only forwards here — so a seek made while
+    // stopped (which is what clicking the sheet is) left the caret at
+    // whatever tick it was already showing.
+    //
+    // Clearing the throttle baseline first is not tidiness: `report` gates on
+    // the distance from the last reported position, so after a backward seek
+    // that distance is negative and every report is suppressed until playback
+    // climbs back past the old position. Jumping from bar 60 to bar 1 froze
+    // the caret for the whole of those 59 bars.
+    this.lastReportedAt = Number.NEGATIVE_INFINITY;
+    this.report(seconds);
   }
 
   setTempoMultiplier(multiplier: number): void {

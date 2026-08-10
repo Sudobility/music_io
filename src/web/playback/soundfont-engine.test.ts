@@ -242,6 +242,51 @@ describe('SoundfontPlaybackEngine: transport', () => {
     expect(host.allSoundOff).toHaveBeenCalled();
   });
 
+  it('reports the new position on seek, so the caret follows a click while stopped', async () => {
+    // The caret is driven by the store's positionTick, and nothing else writes
+    // it: `PlaybackController.seek` only forwards to the engine. Without this
+    // report a click on the sheet moved the transport but left the caret at
+    // tick 0, which is exactly how it looked.
+    const { engine, score } = setup();
+    const ticks: number[] = [];
+    engine.setObserver({
+      onPositionTick: (t) => ticks.push(t),
+      onActiveNotes: () => {},
+      onStateChange: () => {},
+    });
+    await engine.initialize();
+    await engine.loadScore(score);
+
+    engine.seek(score.ppq * 4);
+    expect(ticks.at(-1)).toBe(score.ppq * 4);
+  });
+
+  it('keeps reporting after a backward seek during playback', async () => {
+    // The throttle compares the incoming position against the last reported
+    // one, so seeking backwards left the difference negative and suppressed
+    // every report until playback caught back up — a caret that froze for as
+    // long as the jump was.
+    const { engine, pump, clock, score } = setup();
+    const ticks: number[] = [];
+    engine.setObserver({
+      onPositionTick: (t) => ticks.push(t),
+      onActiveNotes: () => {},
+      onStateChange: () => {},
+    });
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+
+    clock.t = 60; // a minute into the piece
+    pump.step();
+    engine.seek(0); // jump back to the top — the audio clock keeps running
+
+    ticks.length = 0;
+    clock.t = 60.5;
+    pump.step();
+    expect(ticks.length).toBeGreaterThan(0);
+  });
+
   it('seeking moves the queue cursor, so earlier notes do not fire afterwards', async () => {
     const { engine, host, pump, clock, score } = setup();
     await engine.initialize();
