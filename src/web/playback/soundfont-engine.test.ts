@@ -20,6 +20,26 @@ function stubHost() {
   };
 }
 
+/** Enough AudioContext for the metronome click, and nothing more. */
+function stubContext() {
+  const param = () => ({ value: 0, setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() });
+  return {
+    sampleRate: 44100,
+    currentTime: 0,
+    destination: { connect: vi.fn(), disconnect: vi.fn() },
+    close: vi.fn(),
+    createOscillator: vi.fn(() => ({
+      frequency: { value: 0 },
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+      onended: null,
+    })),
+    createGain: vi.fn(() => ({ gain: param(), connect: vi.fn(), disconnect: vi.fn() })),
+  } as unknown as AudioContext;
+}
+
 /** A pump we step by hand, so tests never wait on real time. */
 function manualPump() {
   let tick: (() => void) | null = null;
@@ -46,7 +66,7 @@ function setup(score?: Score) {
     moduleUrls: { fluidsynth: 'f.js', worklet: 'w.js' },
     fontUrl: 'font.sf3',
     loadFont: async () => new Uint8Array(4).buffer,
-    createContext: () => ({ sampleRate: 44100, close: vi.fn() }) as unknown as AudioContext,
+      createContext: () => stubContext(),
     now: () => clock.t,
     startPump: pump.start,
   });
@@ -193,6 +213,23 @@ describe('SoundfontPlaybackEngine: transport', () => {
     clock.t = 5;
     pump.step(); // a stray tick must not resurrect playback
     expect(host.noteOn).not.toHaveBeenCalled();
+  });
+
+  it('clicks only when the metronome is on', async () => {
+    const { engine, pump, clock, score } = setup();
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+
+    clock.t = 1;
+    pump.step();
+    const context = (engine as unknown as { context: AudioContext }).context;
+    expect(vi.mocked(context.createOscillator)).not.toHaveBeenCalled();
+
+    engine.setMetronome(true);
+    clock.t = 2;
+    pump.step();
+    expect(vi.mocked(context.createOscillator)).toHaveBeenCalled();
   });
 
   it('silences everything on stop rather than leaving notes ringing', async () => {

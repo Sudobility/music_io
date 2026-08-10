@@ -19,7 +19,8 @@ import type { ChannelAssignment } from './channel-allocator.js';
 import { PlaybackClock } from './clock.js';
 import { NoteQueue } from './note-queue.js';
 import { planDispatch } from './pump-window.js';
-import { flattenScoreForPlayback } from './schedule.js';
+import { scheduleClick } from './click.js';
+import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
 import { loadSoundfont } from './soundfont-loader.js';
 
 /** The slice of `SynthHost` this engine drives, so tests can pass a stub. */
@@ -107,6 +108,10 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
    * however busy the thread was.
    */
   private startAtSeconds: number | null = null;
+  private metronomeEnabled = false;
+  /** Click positions in ticks, with a cursor, mirroring how notes are drained. */
+  private clicks: Array<{ tick: number; accent: boolean }> = [];
+  private clickCursor = 0;
   /** Audition voices are held on their own channel so they never disturb a track. */
   private auditionHeld = new Map<number, ChannelAssignment>();
 
@@ -151,6 +156,8 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.score = score;
     this.tempoMap = new TempoMap(score.tempoMap, score.ppq);
     this.queue.load(flattenScoreForPlayback(score));
+    this.clicks = metronomeClicks(score);
+    this.clickCursor = 0;
 
     const { assignments } = allocateChannels(
       score.tracks.map((t) => ({ id: t.id, isPercussion: t.clef === 'percussion' })),
@@ -211,6 +218,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.deps.host.allSoundOff();
     this.clearSounding();
     this.queue.seekToTick(0);
+    this.clickCursor = 0;
     this.observer?.onPositionTick(0);
     this.observer?.onStateChange('stopped');
   }
@@ -218,6 +226,8 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   seek(tick: number): void {
     this.clock.seek(this.secondsForTick(tick));
     this.queue.seekToTick(tick);
+    this.clickCursor = this.clicks.findIndex((c) => c.tick >= tick);
+    if (this.clickCursor < 0) this.clickCursor = this.clicks.length;
     this.deps.host.allSoundOff();
     this.clearSounding();
   }
@@ -244,8 +254,8 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.applyTrackLevels();
   }
 
-  setMetronome(): void {
-    // Replaced in a later task; the click no longer runs through Tone.
+  setMetronome(enabled: boolean): void {
+    this.metronomeEnabled = enabled;
   }
 
   setMasterVolume(volume: number): void {
@@ -329,8 +339,28 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
       });
     }
 
+    this.pumpMetronome(position, untilSeconds);
     this.report(position);
     if (this.queue.exhausted && this.pendingOffs.length === 0 && this.clock.isRunning) this.stop();
+  }
+
+  /**
+   * Clicks due in this window, scheduled ahead at their exact moment.
+   *
+   * Unlike notes, these can be placed precisely: an oscillator started with
+   * `start(at)` sounds at that sample however busy the main thread is, so the
+   * click stays steady even when the pump runs late.
+   */
+  private pumpMetronome(position: number, untilSeconds: number): void {
+    if (!this.metronomeEnabled || !this.context) return;
+    while (this.clickCursor < this.clicks.length) {
+      const click = this.clicks[this.clickCursor];
+      const atSeconds = this.secondsForTick(click.tick);
+      if (atSeconds > untilSeconds) break;
+      this.clickCursor += 1;
+      if (atSeconds < position) continue; // already gone by; do not stack it up
+      scheduleClick(this.context, this.context.destination, atSeconds, click.accent);
+    }
   }
 
   /** Inverse of `secondsForTick`, for turning the lookahead window back into ticks. */
