@@ -78,14 +78,16 @@ describe('SynthHost', () => {
     expect(added.slice(1)).toEqual(['fluid.js', 'worklet.js']);
   });
 
-  it('never selects a program on a percussion channel', async () => {
-    // The spike measured this: selecting a program on channel 9 replaces
-    // fluidsynth's working default with a preset that is not there, and the
-    // channel goes silent. Guarding it here is the whole reason drums work.
+  it('never selects a melodic program on a percussion channel', async () => {
+    // Measured on a real synth: selecting from bank 0 on channel 9 leaves it
+    // playing a piano, and it stays that way for every later note. Only the
+    // melodic bank is refused — the drum bank is how a kit gets chosen at all,
+    // which is why this asserts the kit select survives and the melodic one
+    // does not.
     const { host, synths } = await hostWith(1);
     host.setChannelPercussion(0, 9);
     host.programSelect(0, 9, 42);
-    expect(synths[0].calls.midiProgramSelect).toBeUndefined();
+    expect(synths[0].calls.midiProgramSelect).toEqual([[9, 1, 128, 0]]);
   });
 
   it('does select a program on an ordinary channel', async () => {
@@ -123,8 +125,24 @@ describe('SynthHost', () => {
   it('leaves channel 9 completely alone, which is what makes drums sound', async () => {
     const { host, synths } = await hostWith(1);
     host.setChannelPercussion(0, 9);
+    // No channel-type switch: channel 9 is a drum channel already. The kit
+    // select is bit-identical to leaving it alone — measured at peak 0.1883,
+    // rms 0.01815 either way — and is what makes a non-standard kit possible.
     expect(synths[0].calls.midiSetChannelType).toBeUndefined();
-    expect(synths[0].calls.midiProgramSelect).toBeUndefined();
+    expect(synths[0].calls.midiProgramSelect).toEqual([[9, 1, 128, 0]]);
+  });
+
+  it('selects the kit the file asked for, after the one the font is guaranteed to have', async () => {
+    // General MIDI selects the drum kit with a program change on the drum
+    // channel. A kit the font lacks leaves fluidsynth's selection untouched,
+    // and untouched on a switched channel is the piano it started on — so
+    // Standard goes on first and a failed switch lands on drums.
+    const { host, synths } = await hostWith(1);
+    host.setChannelPercussion(0, 9, 8); // Room
+    expect(synths[0].calls.midiProgramSelect).toEqual([
+      [9, 1, 128, 0],
+      [9, 1, 128, 8],
+    ]);
   });
 
   it('applies interpolation to every instance, since the governor speaks for all of them', async () => {

@@ -42,7 +42,7 @@ export type SynthHostLike = {
       instanceCount: number;
     },
   ): Promise<void>;
-  setChannelPercussion(instance: number, channel: number): void;
+  setChannelPercussion(instance: number, channel: number, kit?: number): void;
   programSelect(instance: number, channel: number, program: number): void;
   noteOn(instance: number, channel: number, midi: number, velocity: number): void;
   noteOff(instance: number, channel: number, midi: number): void;
@@ -298,7 +298,9 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
       if (!assignment) continue;
 
       if (assignment.needsDrumTypeSwitch || track.clef === 'percussion') {
-        this.deps.host.setChannelPercussion(assignment.instance, assignment.channel);
+        // General MIDI selects the drum kit with a program change on the drum
+        // channel, so the track's program is its kit — Room, TR-808, Jazz.
+        this.deps.host.setChannelPercussion(assignment.instance, assignment.channel, track.midiProgram);
       } else {
         // A soundfont needs only the GM program number. The program-versus-name
         // rule the old engine used existed to choose among hand-built synth

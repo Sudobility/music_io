@@ -113,12 +113,12 @@ export class SynthHost {
    * other channel does, which is what lets a second drum track share an
    * instance rather than costing a whole synth for its own channel 9.
    */
-  setChannelPercussion(instance: number, channel: number): void {
+  setChannelPercussion(instance: number, channel: number, kit = STANDARD_KIT): void {
     this.percussionChannels.add(`${instance}:${channel}`);
-    if (channel === 9) return;
     const synth = this.synths[instance];
     if (!synth) return;
-    synth.midiSetChannelType(channel, true);
+    // Channel 9 is a drum channel already in GM mode; any other has to be told.
+    if (channel !== 9) synth.midiSetChannelType(channel, true);
     // Switching the type is not enough on its own. It tells fluidsynth to read
     // later program changes from the drum bank, but leaves the channel on the
     // preset it already had — bank 0, program 0, a piano. A second drum track
@@ -129,7 +129,21 @@ export class SynthHost {
     // at 0.01187 RMS, this channel with only the type switch gave 0.1115 at
     // 0.01437 — a different instrument — and with the select below it matched
     // channel 9 to the digit.
+    // Standard first, then the kit the file asked for. A kit that the font does
+    // not have leaves fluidsynth's selection untouched, and "untouched" on a
+    // switched channel is the piano it started on — so the guaranteed kit goes
+    // on first and a failed switch falls back to drums rather than to a piano.
+    //
+    // Measured: on channel 9 this select is bit-identical to leaving it alone
+    // (peak 0.1883, rms 0.01815 either way), and preset 8 gives the Room kit
+    // (0.4027) — so honouring the kit costs nothing and ignoring it was simply
+    // wrong. The older rule, "never select a program on a percussion channel",
+    // was too broad: it is selecting from the *melodic* bank that breaks a drum
+    // channel, and that one is still refused in `programSelect`.
     synth.midiProgramSelect(channel, this.sfontIds[instance], DRUM_BANK, STANDARD_KIT);
+    if (kit !== STANDARD_KIT) {
+      synth.midiProgramSelect(channel, this.sfontIds[instance], DRUM_BANK, kit);
+    }
   }
 
   /**

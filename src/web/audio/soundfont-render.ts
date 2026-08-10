@@ -85,9 +85,14 @@ export function createSoundfontRenderer(
         // the drum bank; the channel keeps the preset it had, which is a piano,
         // so a second drum track rendered its congas as piano notes. Never
         // select a melodic program on either: on channel 9 that silences it.
-        if (channel !== 9) {
-          synth.midiSetChannelType(channel, true);
-          synth.midiProgramSelect(channel, sfontId, DRUM_BANK, STANDARD_KIT);
+        if (channel !== 9) synth.midiSetChannelType(channel, true);
+        // Standard first so a kit the font lacks falls back to drums rather
+        // than to the piano a switched channel starts on. General MIDI selects
+        // the kit with a program change on the drum channel, so the track's
+        // program is its kit.
+        synth.midiProgramSelect(channel, sfontId, DRUM_BANK, STANDARD_KIT);
+        if (track.midiProgram !== STANDARD_KIT) {
+          synth.midiProgramSelect(channel, sfontId, DRUM_BANK, track.midiProgram);
         }
       } else {
         synth.midiSetChannelType(channel, false);

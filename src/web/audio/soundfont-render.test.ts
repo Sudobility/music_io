@@ -81,13 +81,30 @@ describe('createSoundfontRenderer', () => {
     expect(audio.samples[0]).toBeCloseTo(0.5, 6);
   });
 
-  it('never selects a program on channel 9, which silences it', async () => {
-    // Measured in the spike: every explicit selection there gave peak 0.0000.
-    // A lone percussion track takes channel 9, so nothing is selected at all.
+  it('selects the drum kit, never a melodic program, on channel 9', async () => {
+    // A lone percussion track takes channel 9, which is a drum channel already
+    // and needs no type switch. It still gets a kit: measured on a real synth,
+    // selecting bank 128 preset 0 there is bit-identical to leaving it alone,
+    // while selecting from the melodic bank leaves it playing a piano for good.
     const synth = stubSynth();
-    await rendererFor(synth)(plan({ tracks: [track({ isPercussion: true })], events: [] }));
-    expect(synth.calls.midiProgramSelect).toBeUndefined();
+    await rendererFor(synth)(
+      plan({ tracks: [track({ isPercussion: true, midiProgram: 0 })], events: [] }),
+    );
     expect(synth.calls.midiSetChannelType).toBeUndefined();
+    expect(synth.calls.midiProgramSelect).toEqual([[9, 1, 128, 0]]);
+  });
+
+  it('honours the kit the file asked for', async () => {
+    // General MIDI selects the kit with a program change on the drum channel,
+    // so a track's program is its kit — 8 is the Room kit.
+    const synth = stubSynth();
+    await rendererFor(synth)(
+      plan({ tracks: [track({ isPercussion: true, midiProgram: 8 })], events: [] }),
+    );
+    expect(synth.calls.midiProgramSelect).toEqual([
+      [9, 1, 128, 0],
+      [9, 1, 128, 8],
+    ]);
   });
 
   it('sends a second drum track to the drum bank, not just the drum channel type', async () => {
