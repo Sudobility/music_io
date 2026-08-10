@@ -51,7 +51,12 @@ export class SynthHost {
   private masterVolume = 1;
   private trackCount = 1;
 
-  constructor(private readonly deps: { createSynth: () => SynthInstance }) {}
+  constructor(
+    private readonly deps: {
+      /** May be async: the real factory imports `js-synthesizer` on first use. */
+      createSynth: () => SynthInstance | Promise<SynthInstance>;
+    },
+  ) {}
 
   async init(context: AudioContext, options: SynthHostOptions): Promise<void> {
     // Order matters: the worklet build expects libfluidsynth already present.
@@ -74,7 +79,7 @@ export class SynthHost {
     this.master = master;
 
     for (let i = 0; i < options.instanceCount; i += 1) {
-      const synth = this.deps.createSynth();
+      const synth = await this.deps.createSynth();
       synth.init(context.sampleRate);
       synth.createAudioNode(context, RENDER_BUFFER_SIZE).connect(master);
       this.sfontIds[i] = await synth.loadSFont(options.soundfont);

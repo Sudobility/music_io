@@ -165,6 +165,36 @@ describe('SoundfontPlaybackEngine: transport', () => {
     expect(host.noteOn.mock.calls.length).toBe(first);
   });
 
+  it('starts the piece at its beginning even when the first pump tick is late', async () => {
+    // Found by hand: the clock used to start in play(), but the first pump tick
+    // can be seconds late while the main thread finishes worklet and soundfont
+    // setup. By then the clock said the music was already seconds in, so every
+    // note before that point was past its grace window and skipped — the
+    // opening of the piece vanished. Measured at 2.3s lost on a real load.
+    const { engine, host, pump, clock, score } = setup();
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+
+    clock.t = 2.3; // the thread was busy; the pump only runs now
+    pump.step();
+
+    // The opening notes must still sound, not be treated as long overdue.
+    expect(host.noteOn).toHaveBeenCalled();
+  });
+
+  it('does not start the clock if playback is stopped before the pump ever runs', async () => {
+    const { engine, host, pump, clock, score } = setup();
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+    engine.stop();
+
+    clock.t = 5;
+    pump.step(); // a stray tick must not resurrect playback
+    expect(host.noteOn).not.toHaveBeenCalled();
+  });
+
   it('silences everything on stop rather than leaving notes ringing', async () => {
     const { engine, host, score } = setup();
     await engine.initialize();
