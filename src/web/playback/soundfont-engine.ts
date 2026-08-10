@@ -87,6 +87,8 @@ const MAX_CC = 127;
  * bar that reaches the end and then waits is worse than one that stops early.
  */
 const FETCH_SHARE = 0.5;
+/** A pump failing every tick must not also flood the console twenty times a second. */
+const MAX_REPORTED_TICK_FAILURES = 3;
 
 /** Percent granularity: finer changes are not worth a store update. */
 function roughly(fraction: number | null): number | null {
@@ -124,6 +126,8 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   /** In-flight bring-up, so concurrent callers share one attempt. */
   private initializing: Promise<void> | null = null;
   private loadState: PlaybackLoadState = { status: 'idle' };
+  /** Counted so a pump that fails every tick reports once, not sixty times a second. */
+  private tickFailures = 0;
   /**
    * Where playback should begin once the pump actually runs.
    *
@@ -471,6 +475,22 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   }
 
   private tick(): void {
+    // Guarded because the pump is a bare interval callback: a throw in here
+    // escapes into nothing, the interval keeps firing, and every later tick
+    // throws at the same place — playback stops dead with a clean console and
+    // a transport still reporting "playing". Whatever else goes wrong, it
+    // should not go wrong invisibly.
+    try {
+      this.dispatchTick();
+    } catch (error) {
+      this.tickFailures += 1;
+      if (this.tickFailures <= MAX_REPORTED_TICK_FAILURES) {
+        console.error('Playback pump failed', error);
+      }
+    }
+  }
+
+  private dispatchTick(): void {
     this.measureLateness();
     if (this.startAtSeconds !== null) {
       this.clock.start(this.startAtSeconds);

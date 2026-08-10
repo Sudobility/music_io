@@ -304,6 +304,31 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
     expect(seen.at(-1)).toEqual({ status: 'failed', message: 'Soundfont fetch failed: 404' });
   });
 
+  it('keeps pumping after a tick throws, and says so', async () => {
+    // A throw in the pump escapes a bare interval callback into nothing. The
+    // interval keeps firing and every later tick throws at the same place, so
+    // playback stops dead with a clean console and a transport still reporting
+    // "playing" — the exact silent-failure shape this engine exists to remove.
+    const { engine, host, pump, clock, score } = setup();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await engine.loadScore(score);
+    await engine.play();
+
+    host.noteOn.mockImplementationOnce(() => {
+      throw new Error('synth blew up');
+    });
+    clock.t = 1;
+    expect(() => pump.step()).not.toThrow();
+    expect(errors).toHaveBeenCalledWith('Playback pump failed', expect.any(Error));
+
+    // And the next tick still dispatches, rather than the pump being dead.
+    host.noteOn.mockClear();
+    clock.t = 2;
+    pump.step();
+    expect(host.noteOn).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
   it('brings the synth up only once for concurrent callers', async () => {
     const { engine, host, score } = setup();
     await Promise.all([engine.initialize(), engine.initialize(), engine.loadScore(score)]);
