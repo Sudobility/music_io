@@ -11,7 +11,7 @@ import { createWebAudioCodec } from './audio/web-audio-codec.js';
 import { renderOffline } from './audio/render.js';
 import { createSoundfontRenderer } from './audio/soundfont-render.js';
 import { SoundfontPlaybackEngine } from './playback/soundfont-engine.js';
-import { loadSoundfont } from './playback/soundfont-loader.js';
+import { loadSoundfont, openSoundfontCache } from './playback/soundfont-loader.js';
 import { SynthHost } from './playback/synth-host.js';
 import type { SynthInstance } from './playback/synth-host.js';
 export { renderOffline } from './audio/render.js';
@@ -77,7 +77,7 @@ export function createMusicIo(options: { soundfont?: SoundfontAssets } = {}): Mu
             fluidsynthModuleUrl: soundfont.fluidsynthModuleUrl,
             workletModuleUrl: soundfont.workletModuleUrl,
             fontUrl: soundfont.fontUrl,
-            loadFont: (url) => loadSoundfont(url, { cache: null }),
+            loadFont: async (url) => loadSoundfont(url, { cache: await openSoundfontCache() }),
             createSynth: createWorkletSynth,
           }),
         }

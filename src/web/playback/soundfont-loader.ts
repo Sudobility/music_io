@@ -12,6 +12,26 @@
  */
 export type LoadProgress = { loaded: number; total: number };
 
+/** Bumped when the stored representation changes, so old entries are not reused. */
+const CACHE_NAME = 'music-soundfont-v1';
+
+/**
+ * The cache the soundfont lives in, or `null` where the Cache API is missing.
+ *
+ * Worth its own function because forgetting it is expensive and silent: without
+ * a cache the font is refetched and re-decoded on every engine init and every
+ * export — tens of megabytes and seconds of work each time, with nothing
+ * visibly wrong.
+ */
+export async function openSoundfontCache(): Promise<Cache | null> {
+  if (typeof caches === 'undefined') return null;
+  try {
+    return await caches.open(CACHE_NAME);
+  } catch {
+    return null; // private browsing and similar; the font still loads
+  }
+}
+
 export async function loadSoundfont(
   url: string,
   opts: { onProgress?: (progress: LoadProgress) => void; cache?: Cache | null } = {},

@@ -22,7 +22,7 @@ import { planDispatch } from './pump-window.js';
 import { scheduleClick } from './click.js';
 import { Governor } from './governor.js';
 import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
-import { loadSoundfont } from './soundfont-loader.js';
+import { loadSoundfont, openSoundfontCache } from './soundfont-loader.js';
 
 /** The slice of `SynthHost` this engine drives, so tests can pass a stub. */
 export type SynthHostLike = {
@@ -122,7 +122,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   constructor(deps: SoundfontEngineDeps) {
     this.deps = {
       ...deps,
-      loadFont: deps.loadFont ?? ((url) => loadSoundfont(url, { cache: null })),
+      loadFont: deps.loadFont ?? (async (url) => loadSoundfont(url, { cache: await openSoundfontCache() })),
       startPump:
         deps.startPump ??
         ((tick, ms) => {
