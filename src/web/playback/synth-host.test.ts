@@ -60,8 +60,10 @@ async function hostWith(instanceCount: number) {
 }
 
 describe('SynthHost', () => {
-  it('loads the fluidsynth module before the worklet module', async () => {
-    // Order matters: the worklet build expects libfluidsynth already present.
+  it('loads the quiet-module seed, then fluidsynth, then the worklet', async () => {
+    // Order is the whole contract here. The seed must precede libfluidsynth so
+    // its emscripten module adopts a printErr that drops build-stub notices,
+    // and libfluidsynth must precede the worklet build, which expects it.
     const ctx = stubContext();
     const host = new SynthHost({ createSynth: () => stubSynth() });
     await host.init(ctx, {
@@ -70,8 +72,10 @@ describe('SynthHost', () => {
       soundfont: new Uint8Array(4).buffer,
       instanceCount: 1,
     });
-    const added = vi.mocked(ctx.audioWorklet.addModule).mock.calls.map((c) => c[0]);
-    expect(added).toEqual(['fluid.js', 'worklet.js']);
+    const added = vi.mocked(ctx.audioWorklet.addModule).mock.calls.map((c) => String(c[0]));
+    expect(added).toHaveLength(3);
+    expect(added[0]).toMatch(/^blob:/); // the quiet-module seed
+    expect(added.slice(1)).toEqual(['fluid.js', 'worklet.js']);
   });
 
   it('never selects a program on a percussion channel', async () => {
@@ -94,7 +98,7 @@ describe('SynthHost', () => {
     // How a second drum track shares an instance instead of costing another.
     const { host, synths } = await hostWith(1);
     host.setChannelPercussion(0, 5);
-    expect(synths[0].calls.midiSetChannelType?.[0]).toEqual([5, 1]);
+    expect(synths[0].calls.midiSetChannelType?.[0]).toEqual([5, true]);
   });
 
   it('routes notes to the instance that owns the channel', async () => {

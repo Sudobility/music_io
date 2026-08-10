@@ -14,6 +14,7 @@
  * percussion guard below is the one that most needs it.
  */
 import { headroomTrimFor, LIMITER_CEILING_DB } from './mix.js';
+import { createWorkletQuietModuleUrl } from './quiet-stub-notices.js';
 
 /** The slice of `AudioWorkletNodeSynthesizer` this host uses. */
 export type SynthInstance = {
@@ -24,7 +25,7 @@ export type SynthInstance = {
   midiNoteOff(channel: number, midi: number): void;
   midiProgramSelect(channel: number, sfontId: number, bank: number, preset: number): void;
   midiControl(channel: number, control: number, value: number): void;
-  midiSetChannelType(channel: number, type: number): void;
+  midiSetChannelType(channel: number, isDrum: boolean): void;
   midiAllSoundsOff(channel?: number): void;
   setInterpolation(order: number): void;
   close(): void;
@@ -37,8 +38,6 @@ export type SynthHostOptions = {
   instanceCount: number;
 };
 
-/** fluidsynth's channel-type constant for a drum channel. */
-const CHANNEL_TYPE_DRUM = 1;
 /** Big enough that the worklet is not woken constantly, small enough not to add audible latency. */
 const RENDER_BUFFER_SIZE = 8192;
 
@@ -59,6 +58,17 @@ export class SynthHost {
   ) {}
 
   async init(context: BaseAudioContext, options: SynthHostOptions): Promise<void> {
+    // Before libfluidsynth, so its emscripten module adopts a printErr that
+    // drops the build-stub notices. Best-effort: if blobs are unavailable the
+    // notices stay and nothing else changes.
+    const quietUrl = createWorkletQuietModuleUrl();
+    if (quietUrl) {
+      try {
+        await context.audioWorklet.addModule(quietUrl);
+      } finally {
+        URL.revokeObjectURL(quietUrl);
+      }
+    }
     // Order matters: the worklet build expects libfluidsynth already present.
     await context.audioWorklet.addModule(options.fluidsynthModuleUrl);
     await context.audioWorklet.addModule(options.workletModuleUrl);
@@ -98,7 +108,7 @@ export class SynthHost {
   setChannelPercussion(instance: number, channel: number): void {
     this.percussionChannels.add(`${instance}:${channel}`);
     if (channel === 9) return;
-    this.synths[instance]?.midiSetChannelType(channel, CHANNEL_TYPE_DRUM);
+    this.synths[instance]?.midiSetChannelType(channel, true);
   }
 
   /**

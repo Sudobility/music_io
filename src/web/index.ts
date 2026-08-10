@@ -75,10 +75,8 @@ export function createMusicIo(options: { soundfont?: SoundfontAssets } = {}): Mu
       ? {
           render: createSoundfontRenderer({
             fluidsynthModuleUrl: soundfont.fluidsynthModuleUrl,
-            workletModuleUrl: soundfont.workletModuleUrl,
             fontUrl: soundfont.fontUrl,
             loadFont: async (url) => loadSoundfont(url, { cache: await openSoundfontCache() }),
-            createSynth: createWorkletSynth,
           }),
         }
       : { render: renderOffline },
