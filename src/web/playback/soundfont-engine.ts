@@ -25,7 +25,7 @@ import { loadSoundfont } from './soundfont-loader.js';
 /** The slice of `SynthHost` this engine drives, so tests can pass a stub. */
 export type SynthHostLike = {
   init(
-    context: AudioContext,
+    context: BaseAudioContext,
     options: {
       fluidsynthModuleUrl: string;
       workletModuleUrl: string;

@@ -9,7 +9,9 @@ import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
 import { SharedModCodec } from '../shared/mod/codec.js';
 import { createWebAudioCodec } from './audio/web-audio-codec.js';
 import { renderOffline } from './audio/render.js';
+import { createSoundfontRenderer } from './audio/soundfont-render.js';
 import { SoundfontPlaybackEngine } from './playback/soundfont-engine.js';
+import { loadSoundfont } from './playback/soundfont-loader.js';
 import { SynthHost } from './playback/synth-host.js';
 import type { SynthInstance } from './playback/synth-host.js';
 export { renderOffline } from './audio/render.js';
@@ -68,7 +70,18 @@ export function createMusicIo(options: { soundfont?: SoundfontAssets } = {}): Mu
     midiCodec: new ToneJsMidiCodec(),
     modCodec: new SharedModCodec(),
     audioCodec: createWebAudioCodec(),
-    audioRenderer: { render: renderOffline },
+    // Export goes through the same synth as playback, so the two cannot drift.
+    audioRenderer: soundfont
+      ? {
+          render: createSoundfontRenderer({
+            fluidsynthModuleUrl: soundfont.fluidsynthModuleUrl,
+            workletModuleUrl: soundfont.workletModuleUrl,
+            fontUrl: soundfont.fontUrl,
+            loadFont: (url) => loadSoundfont(url, { cache: null }),
+            createSynth: createWorkletSynth,
+          }),
+        }
+      : { render: renderOffline },
     fileExporter: new WebFileExporter(),
   };
 }

@@ -58,7 +58,7 @@ export class SynthHost {
     },
   ) {}
 
-  async init(context: AudioContext, options: SynthHostOptions): Promise<void> {
+  async init(context: BaseAudioContext, options: SynthHostOptions): Promise<void> {
     // Order matters: the worklet build expects libfluidsynth already present.
     await context.audioWorklet.addModule(options.fluidsynthModuleUrl);
     await context.audioWorklet.addModule(options.workletModuleUrl);
