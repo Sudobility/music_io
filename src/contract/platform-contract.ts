@@ -21,15 +21,6 @@ export function runPlatformContract(name: string, createIo: () => MusicIo): void
       expect(io.audioCodec).toBeDefined();
       expect(io.modCodec).toBeDefined();
       expect(io.audioRenderer).toBeDefined();
-      expect(io.audioTranscriber).toBeDefined();
-    });
-
-    it('answers a transcription request one way or the other', async () => {
-      // Every platform has to have an answer: the web model, or a refusal a
-      // caller can fall back from. Silence would look like a hung import.
-      const io = createIo();
-      const audio = { samples: new Float32Array(1024), sampleRate: 22050 };
-      await expect(io.audioTranscriber.transcribe(audio)).rejects.toBeDefined();
     });
 
     it('rejects bytes that are not a module', () => {

@@ -122,12 +122,6 @@ export function createMusicIo(): MusicIo {
       // No audio context here; rendering is a browser capability.
       render: () => Promise.reject(new Error('Offline audio rendering is not available on this platform')),
     },
-    audioTranscriber: {
-      // The model and its tensor runtime are web-only. Callers fall back to
-      // music_lib's pure YIN tracker, which is monophonic but needs nothing.
-      transcribe: () =>
-        Promise.reject(new Error('Audio transcription is not available on this platform')),
-    },
     fileExporter: new MockFileExporter(),
   };
 }

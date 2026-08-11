@@ -6,7 +6,6 @@ import { WebXmlParser } from './xml/xml.web.js';
 import { WebFileExporter } from './file/file.web.js';
 import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
 import { SharedModCodec } from '../shared/mod/codec.js';
-import { createBasicPitchTranscriber } from './audio/basic-pitch-transcriber.js';
 import { createWebAudioCodec } from './audio/web-audio-codec.js';
 import { createSoundfontRenderer } from './audio/soundfont-render.js';
 import { SoundfontPlaybackEngine } from './playback/soundfont-engine.js';
@@ -56,18 +55,11 @@ export type SoundfontAssets = {
  * Where the Basic Pitch model is served from, hosted by the app for the same
  * reason the soundfont is: a library cannot know how its consumer serves files.
  */
-export type TranscriptionAssets = {
-  /** URL of the model's `model.json`; its weight shard sits beside it. */
-  modelUrl: string;
-};
-
 /** Everything the web platform provides, built fresh. */
 export function createMusicIo({
   soundfont,
-  transcription,
 }: {
   soundfont: SoundfontAssets;
-  transcription: TranscriptionAssets;
 }): MusicIo {
   return {
     playback: new SoundfontPlaybackEngine({
@@ -87,7 +79,6 @@ export function createMusicIo({
         loadFont: async (url) => loadSoundfont(url, { cache: await openSoundfontCache() }),
       }),
     },
-    audioTranscriber: createBasicPitchTranscriber({ modelUrl: transcription.modelUrl }),
     fileExporter: new WebFileExporter(),
   };
 }
