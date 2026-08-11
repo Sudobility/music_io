@@ -1,4 +1,5 @@
 import type {
+  AudioTranscriber,
   AudioCodec,
   AudioRenderer,
   FileExporter,
@@ -20,5 +21,6 @@ export type MusicIo = {
   modCodec: ModCodec;
   audioCodec: AudioCodec;
   audioRenderer: AudioRenderer;
+  audioTranscriber: AudioTranscriber;
   fileExporter: FileExporter;
 };
