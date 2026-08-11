@@ -4,8 +4,10 @@
   "author": "Sudobility",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@spotify/basic-pitch": "^1.0.1",
     "@sudobility/music_lib": "^1.7.21",
     "@sudobility/music_types": "^0.11.11",
+    "@tensorflow/tfjs": "^4.22.0",
     "@tonejs/midi": "^2.0.28",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
