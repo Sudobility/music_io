@@ -31,6 +31,7 @@
  *     --soundfont ../music_app/public/audio/FluidR3Mono_GM.sf3 \
  *     --out src/rn/playback/expression-table.ts
  */
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -263,6 +264,7 @@ function measureSustain(signal, noteStart) {
 
 const soundfont = arg('--soundfont');
 const out = arg('--out');
+const soundfontHash = createHash('sha256').update(readFileSync(soundfont)).digest('hex');
 const work = join(tmpdir(), `measure-expression-${process.pid}`);
 mkdirSync(work, { recursive: true });
 
@@ -319,6 +321,15 @@ try {
       ' * release, and whether the instrument holds its level while held.',
       ' * See `rn/playback/expression.ts` for what applies it.',
       ' */',
+      '/**',
+      ' * SHA-256 of the soundfont these numbers were measured from.',
+      ' *',
+      ' * Swap the font and every cutoff, release and sustain flag here describes an',
+      ' * instrument that is no longer being played — silently, because nothing about a',
+      ' * stale table throws. music_app owns the font, so music_app asserts the match.',
+      ' */',
+      `export const MEASURED_FROM_SHA256 = '${soundfontHash}';`,
+      '',
       'export type ExpressionEntry = {',
       '  cutoffs: Record<string, number>;',
       '  releaseSec: number | null;',

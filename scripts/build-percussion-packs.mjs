@@ -23,6 +23,7 @@
  * font changes — not part of `bun run build`, because it takes minutes and its
  * output is an asset the app hosts rather than something this package ships.
  */
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -219,7 +220,13 @@ try {
     console.log(`${kit.name.padEnd(16)} -> ${packName}-mp3.js  ${kept} drums, ${(body.length / 1024).toFixed(0)} KB`);
   }
 
-  writeFileSync(join(outDir, 'names.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  // The hash pins these renderings to the font they came from. Without it a
+  // swapped soundfont leaves eight kits describing drums nobody is playing, and
+  // nothing anywhere reports a problem.
+  writeFileSync(
+    join(outDir, 'names.json'),
+    `${JSON.stringify({ soundfontSha256: createHash('sha256').update(readFileSync(soundfont)).digest('hex'), packs: manifest }, null, 2)}\n`,
+  );
   writeFileSync(
     join(outDir, 'ATTRIBUTION.md'),
     [

@@ -1,10 +1,10 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "author": "Sudobility",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sudobility/music_lib": "^1.7.23",
+    "@sudobility/music_lib": "^1.7.24",
     "@sudobility/music_types": "^0.11.13",
     "@tonejs/midi": "^2.0.28",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
@@ -20,7 +20,7 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
-    "@sudobility/music_lib": "^1.7.23",
+    "@sudobility/music_lib": "^1.7.24",
     "@sudobility/music_types": "^0.11.13",
     "@tonejs/midi": "^2.0.28",
     "fast-xml-parser": ">=5.0.0",
@@ -51,6 +51,11 @@
     "./mocks": {
       "types": "./dist/mocks/index.d.ts",
       "import": "./dist/mocks/index.js"
+    },
+    "./rn/expression-table": {
+      "types": "./dist/rn/playback/expression-table.d.ts",
+      "import": "./dist/rn/playback/expression-table.js",
+      "default": "./dist/rn/playback/expression-table.js"
     }
   },
   "description": "Platform implementations for ScoreSmith: playback, XML parsing, file export and MIDI codecs, for web and React Native",

@@ -63,16 +63,36 @@ describe('applySustainLoop', () => {
     expect(s.loopEnd - s.loopStart).toBeGreaterThan(0.25);
   });
 
-  it('puts both bounds on a rising zero crossing, so the seam has no step', () => {
+
+  it('spans a whole number of periods of the sampled note', () => {
+    // The seam's real problem is phase, not sign. An arbitrary window ends
+    // part-way through a cycle, so the waveform jumps back mid-period and every
+    // harmonic restarts out of phase — audible as a buzz once a second on a
+    // held note. A0 = MIDI 21 = 27.5Hz here, chosen because its period is long
+    // enough that a rounding error would show.
+    const s = source();
+    const hz = 27.5;
+    applySustainLoop(s, buffer(3.13, hz), 6, 21);
+
+    const periods = (s.loopEnd - s.loopStart) * hz;
+    expect(periods).toBeCloseTo(Math.round(periods), 1);
+  });
+
+  it('still loops when the sampled note is unknown', () => {
+    // A caller with no pitch gets a working loop, just a less quiet seam.
+    const s = source();
+    expect(applySustainLoop(s, buffer(), 6)).toBe(true);
+    expect(s.loopEnd).toBeGreaterThan(s.loopStart);
+  });
+
+  it('starts the loop on a rising zero crossing', () => {
     const s = source();
     const buf = buffer();
-    applySustainLoop(s, buf, 6);
+    applySustainLoop(s, buf, 6, 57); // A3 = 220Hz, matching the fixture tone
     const data = buf.getChannelData(0);
-    for (const bound of [s.loopStart, s.loopEnd]) {
-      const i = Math.round(bound * RATE);
-      expect(data[i - 1]!, `sample before ${bound}`).toBeLessThanOrEqual(0);
-      expect(data[i]!, `sample at ${bound}`).toBeGreaterThan(0);
-    }
+    const i = Math.round(s.loopEnd * RATE);
+    expect(data[i - 1]!).toBeLessThanOrEqual(0);
+    expect(data[i]!).toBeGreaterThan(0);
   });
 
   it('declines when the recording is too short to hold a window', () => {

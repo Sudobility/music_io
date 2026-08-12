@@ -404,7 +404,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     // exponential conversion here to get subtly wrong. Packs cover every key,
     // so this is normally 0 and only matters for a pack with gaps.
     if (plan.detuneCents !== 0) source.detune.value = plan.detuneCents;
-    if (mayLoop) applySustainLoop(source, buffer, plan.releaseAt - plan.startAt);
+    if (mayLoop) applySustainLoop(source, buffer, plan.releaseAt - plan.startAt, plan.sampleMidi);
 
     const amp = ctx.createGain();
     amp.gain.setValueAtTime(plan.gain, plan.startAt);

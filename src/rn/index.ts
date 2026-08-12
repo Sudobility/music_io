@@ -14,6 +14,13 @@ import type { SampleEngineDeps } from './playback/sample-engine.js';
 import type { MusicIo } from '../shared/types.js';
 
 export { RNXmlParser, RNFileExporter, ToneJsMidiCodec, RNSamplePlaybackEngine, createRNSoundfontRenderer };
+/**
+ * Deliberately *not* re-exported here: the app that owns the soundfont needs
+ * `MEASURED_FROM_SHA256` to check the two still agree, and reaching it through
+ * this entry drags in `fast-xml-parser` and the rest of the RN optional peers,
+ * which a web app does not install. It has its own dependency-free subpath,
+ * `@sudobility/music_io/rn/expression-table`.
+ */
 export type { MusicIo, SampleEngineDeps };
 
 export type RNMusicIoOptions = {

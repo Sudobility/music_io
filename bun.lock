@@ -9,7 +9,7 @@
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "@sudobility/music_lib": "^1.7.23",
+        "@sudobility/music_lib": "^1.7.24",
         "@sudobility/music_types": "^0.11.13",
         "@tonejs/midi": "^2.0.28",
         "@typescript-eslint/eslint-plugin": "^8.65.0",
@@ -25,7 +25,7 @@
         "vitest": "^4.1.10",
       },
       "peerDependencies": {
-        "@sudobility/music_lib": "^1.7.23",
+        "@sudobility/music_lib": "^1.7.24",
         "@sudobility/music_types": "^0.11.13",
         "@tonejs/midi": "^2.0.28",
         "fast-xml-parser": ">=5.0.0",
@@ -146,7 +146,7 @@
 
     "@sudobility/music_client": ["@sudobility/music_client@0.1.1", "", { "dependencies": { "@sudobility/music_types": "^0.1.0" }, "peerDependencies": { "@sudobility/di": "^1.5.58", "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5", "react": ">=18" } }, "sha512-aHSfqHcmzlyRH7ZEAFV8tL2ZSJjxLzYTpexC3wNNCWQz0BOKEE4LH8WDRhx87Kl1Jl70ewl2ubO3XbzhzRsZwA=="],
 
-    "@sudobility/music_lib": ["@sudobility/music_lib@1.7.23", "", { "dependencies": { "immer": "^10.0.0 || ^11.0.0", "vexflow": "^4.2.5", "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/music_client": "^0.4.13", "@sudobility/music_types": "^0.11.12", "@tanstack/react-query": ">=5", "react": ">=18", "zustand": ">=5" } }, "sha512-bBEfwh1qFEhPtsIiUswy1DS9Qz93kJqe45T+QizXAP6v91R3lwy7X28On7qUs2NdyIke7r4zidomo1/UJKjojQ=="],
+    "@sudobility/music_lib": ["@sudobility/music_lib@1.7.24", "", { "dependencies": { "immer": "^10.0.0 || ^11.0.0", "vexflow": "^4.2.5", "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/music_client": "^0.4.14", "@sudobility/music_types": "^0.11.13", "@tanstack/react-query": ">=5", "react": ">=18", "zustand": ">=5" } }, "sha512-qRvBeYpQVmmImHikPAKD64uPP0bjWiuvnz7UUsOcDhoVhaV00qsseG7Amzjq7edD3faFnWyEYBTSNENIS6i1TQ=="],
 
     "@sudobility/music_types": ["@sudobility/music_types@0.11.13", "", { "dependencies": { "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/types": "^1.9.64" } }, "sha512-la8fv0xEpPRMYxvAC+zTP0cW1pR5fk3MZPsC3/Z/gyVcEwfT+4TlpzLDTl2agiGk/Xs7ezokYgOt10uQUeRC6Q=="],
 

@@ -17,6 +17,7 @@
  * supposed to die away, which is a worse and more obvious error than the
  * truncation it fixes.
  */
+import { midiToHertz } from '../../shared/playback/midi.js';
 import type { RNAudioBuffer, RNBufferSource } from './audio-api.js';
 
 /** Kept clear of the end, which holds the rendered note's own release. */
@@ -37,33 +38,64 @@ const MIN_LOOP_SECONDS = 0.25;
  * Returns whether looping was applied — false when the note is short enough to
  * play straight through, or the recording too short to find a window in.
  *
- * Loop bounds are nudged onto rising zero crossings. It does not make the seam
- * seamless (that would need pitch-aware placement, or a crossfade this API
- * cannot express on one node), but matching sign and slope removes the step
- * discontinuity that is the audible part of a bad loop.
+ * **The loop spans a whole number of periods of the note being played.** That
+ * is what makes the seam quiet. Aligning both ends to rising zero crossings, as
+ * the first version did, removes the step discontinuity but not the *phase*
+ * one: an arbitrary-length window ends part-way through a cycle, so the
+ * waveform jumps back mid-period and every partial above the fundamental
+ * restarts out of phase. Rounding the window to whole periods lands the end of
+ * the loop at the same point in the cycle as its start, so the fundamental and
+ * its harmonics all continue smoothly.
+ *
+ * The sampled note is known — it is the pack entry being played — so its
+ * fundamental is known, and no pitch detection is needed. `sampleMidi` is the
+ * *sampled* note rather than the sounding one: the buffer holds the recording
+ * as rendered, and `detune` bends it afterwards, so the period in the buffer
+ * belongs to the sample.
  */
 export function applySustainLoop(
   source: RNBufferSource,
   buffer: RNAudioBuffer,
   neededSeconds: number,
+  sampleMidi?: number,
 ): boolean {
   const duration = buffer.duration;
   if (neededSeconds <= duration) return false;
 
   const end = duration - TAIL_GUARD_SECONDS;
-  const window = Math.min(MAX_LOOP_SECONDS, end / 2);
-  if (end <= 0 || window < MIN_LOOP_SECONDS) return false;
+  const target = Math.min(MAX_LOOP_SECONDS, end / 2);
+  if (end <= 0 || target < MIN_LOOP_SECONDS) return false;
 
   const channel = buffer.getChannelData(0);
   const rate = buffer.sampleRate;
-  const loopEnd = nearestRisingZero(channel, Math.floor(end * rate), rate) / rate;
-  const loopStart = nearestRisingZero(channel, Math.floor((end - window) * rate), rate) / rate;
-  if (!(loopEnd > loopStart)) return false;
+
+  const endSample = nearestRisingZero(channel, Math.floor(end * rate), rate);
+  const lengthSamples = wholePeriods(target * rate, sampleMidi, rate);
+  const startSample = endSample - lengthSamples;
+  if (startSample <= 0) return false;
+
+  const loopStart = startSample / rate;
+  const loopEnd = endSample / rate;
+  if (!(loopEnd > loopStart) || loopEnd - loopStart < MIN_LOOP_SECONDS) return false;
 
   source.loop = true;
   source.loopStart = loopStart;
   source.loopEnd = loopEnd;
   return true;
+}
+
+/**
+ * `targetSamples` rounded to a whole number of periods of `sampleMidi`.
+ *
+ * Returned unchanged when the note is unknown — a caller with no pitch (a test,
+ * a future non-melodic use) still gets a working loop, just one whose seam is
+ * only zero-crossing-aligned.
+ */
+function wholePeriods(targetSamples: number, sampleMidi: number | undefined, sampleRate: number): number {
+  if (sampleMidi === undefined) return Math.round(targetSamples);
+  const period = sampleRate / midiToHertz(sampleMidi);
+  const periods = Math.max(1, Math.round(targetSamples / period));
+  return Math.round(periods * period);
 }
 
 /**

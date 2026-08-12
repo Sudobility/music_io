@@ -5,6 +5,15 @@
  * release, and whether the instrument holds its level while held.
  * See `rn/playback/expression.ts` for what applies it.
  */
+/**
+ * SHA-256 of the soundfont these numbers were measured from.
+ *
+ * Swap the font and every cutoff, release and sustain flag here describes an
+ * instrument that is no longer being played — silently, because nothing about a
+ * stale table throws. music_app owns the font, so music_app asserts the match.
+ */
+export const MEASURED_FROM_SHA256 = '2aacd036d7058d40a371846ef2f5dc5f130d648ab3837fe2626591ba49a71254';
+
 export type ExpressionEntry = {
   cutoffs: Record<string, number>;
   releaseSec: number | null;

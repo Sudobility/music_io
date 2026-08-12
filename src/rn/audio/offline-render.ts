@@ -138,7 +138,7 @@ function buildOfflineVoice(
   const source = ctx.createBufferSource();
   source.buffer = buffer;
   if (voice.detuneCents !== 0) source.detune.value = voice.detuneCents;
-  if (mayLoop) applySustainLoop(source, buffer, voice.releaseAt - voice.startAt);
+  if (mayLoop) applySustainLoop(source, buffer, voice.releaseAt - voice.startAt, voice.sampleMidi);
 
   const amp = ctx.createGain();
   amp.gain.setValueAtTime(voice.gain, voice.startAt);
