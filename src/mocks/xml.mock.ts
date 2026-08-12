@@ -76,7 +76,11 @@ class MockElement implements XmlElement {
   }
 
   get textContent(): string | null {
-    return this.node.text.length > 0 ? this.node.text : null;
+    const childText = this.node.children
+      .map((child) => new MockElement(child).textContent ?? '')
+      .join('');
+    const text = `${this.node.text}${childText}`;
+    return text.length > 0 ? text : null;
   }
 
   get children(): ArrayLike<XmlElement> {

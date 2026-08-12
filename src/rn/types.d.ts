@@ -57,9 +57,23 @@ declare module 'react-native-audio-api' {
 }
 
 declare module 'react-native-fs' {
+  export type ReadDirItem = {
+    name: string;
+    path: string;
+    mtime?: Date | null;
+  };
   export const CachesDirectoryPath: string;
+  export function mkdir(path: string): Promise<void>;
+  export function readDir(path: string): Promise<ReadDirItem[]>;
+  export function unlink(path: string): Promise<void>;
   export function writeFile(path: string, contents: string, encoding: string): Promise<void>;
-  const RNFS: { CachesDirectoryPath: string; writeFile: typeof writeFile };
+  const RNFS: {
+    CachesDirectoryPath: string;
+    mkdir: typeof mkdir;
+    readDir: typeof readDir;
+    unlink: typeof unlink;
+    writeFile: typeof writeFile;
+  };
   export default RNFS;
 }
 

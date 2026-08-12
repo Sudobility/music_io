@@ -30,8 +30,19 @@ class FxpElement implements XmlElement {
     if (!isElementNode(this.node)) {
       return this.node === undefined || this.node === null ? null : String(this.node);
     }
+    // Own text, then descendants. DOM interleaves the two in document order;
+    // `fast-xml-parser` collapses an element's text nodes into one `#text` key
+    // and loses where they sat relative to child elements, so `<a>x<b>y</b>z</a>`
+    // comes out "xzy" here against DOM's "xyz". MusicXML has no mixed content,
+    // and recovering order would mean `preserveOrder: true` and a different node
+    // shape throughout this file.
+    const parts: string[] = [];
     const text = this.node[TEXT_KEY];
-    return text === undefined || text === null ? null : String(text);
+    if (text !== undefined && text !== null) parts.push(String(text));
+    for (const child of Array.from(this.children)) {
+      if (child.textContent !== null) parts.push(child.textContent);
+    }
+    return parts.length > 0 ? parts.join('') : null;
   }
 
   get children(): ArrayLike<XmlElement> {

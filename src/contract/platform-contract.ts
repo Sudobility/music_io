@@ -92,6 +92,26 @@ export function runPlatformContract(
       expect(Array.from(root.children)[0].tagName).toBe('part');
     });
 
+    /**
+     * `textContent` reaches descendants, not just the element's own text.
+     *
+     * Deliberately *not* claiming to match DOM exactly. It does for the nesting
+     * MusicXML actually uses — an element whose text lives in leaves — which is
+     * what this pins. It does not for mixed content: given `<a>x<b>y</b>z</a>`
+     * the web parser returns "xyz" and the other two "xzy", because
+     * `fast-xml-parser` collapses an element's text nodes into one `#text` key
+     * and discards their position relative to child elements. Document order is
+     * not recoverable from that, so the divergence is the parser's and cannot be
+     * closed here. MusicXML has no mixed content, so nothing depends on it.
+     */
+    it('reports textContent from descendant text, not only the element\'s own', () => {
+      const root = createIo().xmlParser.parse(
+        '<score-partwise><part><measure><note>C4</note></measure></part></score-partwise>',
+      );
+      const part = root.getElementsByTagName('part')[0];
+      expect(part.textContent).toBe('C4');
+    });
+
     it('rejects malformed XML rather than returning a broken root', () => {
       expect(() => createIo().xmlParser.parse('<a><b></a>')).toThrow();
     });
@@ -172,6 +192,5 @@ export function runPlatformContract(
       expect(new TextDecoder().decode(new Uint8Array(wav, 8, 4))).toBe('WAVE');
       expect(wav.byteLength).toBe(44 + samples.length * 2);
     });
-
   });
 }

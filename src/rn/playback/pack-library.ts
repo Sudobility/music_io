@@ -13,6 +13,7 @@
 import { exactSample, nearestSample, parseSamplePack, sampleUrlFor } from './sample-pack.js';
 import type { SampleChoice, SamplePack } from './sample-pack.js';
 import type { RNAudioBuffer } from './audio-api.js';
+import { base64ToBytes } from '../base64.js';
 
 export type PackLibraryDeps = {
   fetchPack: (url: string) => Promise<string>;
@@ -98,22 +99,4 @@ export function dataUriToBytes(uri: string): ArrayBuffer {
   return base64ToBytes(uri.slice(comma + 1));
 }
 
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-export function base64ToBytes(base64: string): ArrayBuffer {
-  const clean = base64.replace(/[^A-Za-z0-9+/]/g, '');
-  const out = new Uint8Array((clean.length * 3) >> 2);
-  let outIndex = 0;
-  let accumulator = 0;
-  let bits = 0;
-  for (const char of clean) {
-    accumulator = (accumulator << 6) | B64.indexOf(char);
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out[outIndex] = (accumulator >> bits) & 0xff;
-      outIndex += 1;
-    }
-  }
-  return out.buffer;
-}
+export { base64ToBytes };

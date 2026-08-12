@@ -51,10 +51,6 @@ export type SoundfontAssets = {
   fontUrl: string;
 };
 
-/**
- * Where the Basic Pitch model is served from, hosted by the app for the same
- * reason the soundfont is: a library cannot know how its consumer serves files.
- */
 /** Everything the web platform provides, built fresh. */
 export function createMusicIo({
   soundfont,
