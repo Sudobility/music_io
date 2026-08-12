@@ -23,11 +23,11 @@ import type {
 import { allocateChannels } from './channel-allocator.js';
 import type { ChannelAssignment } from './channel-allocator.js';
 import { PlaybackClock } from './clock.js';
-import { NoteQueue } from './note-queue.js';
-import { planDispatch } from './pump-window.js';
+import { NoteQueue } from '../../shared/playback/note-queue.js';
+import { planDispatch } from '../../shared/playback/pump-window.js';
 import { scheduleClick } from './click.js';
 import { Governor } from './governor.js';
-import { flattenScoreForPlayback, metronomeClicks } from './schedule.js';
+import { flattenScoreForPlayback, metronomeClicks } from '../../shared/playback/schedule.js';
 import { loadSoundfont, openSoundfontCache } from './soundfont-loader.js';
 import type { LoadProgress } from './soundfont-loader.js';
 

@@ -15,8 +15,8 @@ import type { SynthInstance } from './playback/synth-host.js';
 import type { MusicIo } from '../shared/types.js';
 
 export { WebXmlParser, WebFileExporter, ToneJsMidiCodec };
-export * from './playback/schedule.js';
-export * from './playback/midi.js';
+export * from '../shared/playback/schedule.js';
+export * from '../shared/playback/midi.js';
 export type { MusicIo };
 
 /**

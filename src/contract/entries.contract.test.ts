@@ -7,9 +7,14 @@ import { runPlatformContract } from './platform-contract.js';
 // it exercises the parsers, codecs and exporter — so placeholders are honest
 // here: fetching only happens once playback or export is actually driven.
 const soundfont = { fluidsynthModuleUrl: '/f.js', workletModuleUrl: '/w.js', fontUrl: '/font.sf3' };
-// Same reasoning for the model: nothing here loads it.
 
 // jsdom because the web parser needs a DOMParser; the mocks entry needs no DOM
 // and is exercised again without one in mocks.contract.test.ts.
-runPlatformContract('web', () => createWebIo({ soundfont }));
-runPlatformContract('mocks', createMockIo);
+runPlatformContract('web', () => createWebIo({ soundfont }), {
+  playback: 'accepts',
+  offlineRender: 'renders',
+});
+// The mock engine records calls instead of sounding, which is 'accepts' as far
+// as the contract is concerned — it does not refuse. Its renderer does refuse:
+// there is no audio context in a test run to render through.
+runPlatformContract('mocks', createMockIo, { playback: 'accepts', offlineRender: 'refuses' });

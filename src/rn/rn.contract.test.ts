@@ -1,25 +1,19 @@
-import { vi } from 'vitest';
 import { runPlatformContract } from '../contract/platform-contract.js';
+import { createMusicIo } from './index.js';
 
 /**
- * `react-native-audio-api` requires `react-native` at import time and has no
- * JS-only build, so it is faked here. That is a real limit on what this proves:
- * the XML, MIDI and interface-shape guarantees are genuinely exercised, but
- * whether Tone.js actually produces sound on the native context is **not**
- * verified by this file and cannot be without a device. See
- * `spikes/tone-on-rn-audio-api.md`.
+ * The RN entry needs no native module faked, because it imports none eagerly:
+ * `react-native-audio-api` is loaded on first use inside the engine, so the
+ * whole entry constructs in a plain Node process.
+ *
+ * `playback: 'accepts'` now — the sample engine is real. What the contract
+ * proves is still bounded, and worth being precise about: the engine's
+ * *transport* is covered in depth by `playback/sample-engine.test.ts` against a
+ * fake audio graph, but nothing here or there proves sound comes out of a
+ * speaker. That needs a device, as it always will for React Native audio.
+ *
+ * Offline render is `'renders'` too now: it schedules the whole plan up front
+ * against an `OfflineAudioContext` and shares `PackLibrary` and `planVoice`
+ * with the engine, so an export is voiced identically to what was heard.
  */
-vi.mock('react-native-audio-api', () => ({
-  AudioContext: class {
-    readonly currentTime = 0;
-    readonly destination = {};
-    close(): void {}
-    resume(): Promise<void> {
-      return Promise.resolve();
-    }
-  },
-}));
-
-const { createMusicIo } = await import('./index.js');
-
-runPlatformContract('rn', createMusicIo);
+runPlatformContract('rn', createMusicIo, { playback: 'accepts', offlineRender: 'renders' });

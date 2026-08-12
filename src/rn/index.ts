@@ -8,64 +8,65 @@ import { RNFileExporter } from './file/file.rn.js';
 import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
 import { SharedModCodec } from '../shared/mod/codec.js';
 import { createRNAudioCodec } from './audio-codec.js';
+import { RNSamplePlaybackEngine } from './playback/sample-engine.js';
+import { createRNSoundfontRenderer } from './audio/offline-render.js';
+import type { SampleEngineDeps } from './playback/sample-engine.js';
 import type { MusicIo } from '../shared/types.js';
-import type { PlaybackEngine } from '@sudobility/music_types';
 
-export { RNXmlParser, RNFileExporter, ToneJsMidiCodec };
-export type { MusicIo };
+export { RNXmlParser, RNFileExporter, ToneJsMidiCodec, RNSamplePlaybackEngine, createRNSoundfontRenderer };
+export type { MusicIo, SampleEngineDeps };
+
+export type RNMusicIoOptions = {
+  /**
+   * Where the melodic FluidR3 packs are served from.
+   *
+   * Defaults to the packs' own GitHub Pages host. An app that would rather not
+   * depend on a third party at runtime can copy them and point this at its own
+   * CDN — they are CC-BY 3.0, so that is allowed, and it is the recommended
+   * setup for anything shipping to a store.
+   */
+  packBase?: string;
+  /**
+   * Where the drum-kit packs are served from. **Required for percussion**;
+   * there is no default because nobody publishes usably-licensed GM percussion.
+   * Render them with `scripts/build-percussion-packs.mjs` and host them the way
+   * the web app hosts its soundfont.
+   */
+  percussionBase?: string;
+};
 
 /**
- * A `PlaybackEngine` that refuses rather than pretends.
+ * Everything React Native provides.
  *
- * Playback needs the soundfont synth, which runs libfluidsynth in an
- * AudioWorklet — a browser capability with no React Native equivalent. The
- * engine that used to be here synthesised its own approximations of the
- * instruments and so could never match what the web plays; a wrong sound is
- * worse than a clear error. Query methods stay silent no-ops so a shared
- * component that calls `pause()` on unmount does not crash the app; anything
- * that would actually make a sound throws.
+ * Playback is a sample-based FluidR3 engine rather than the web's
+ * libfluidsynth-in-an-AudioWorklet — React Native has neither WebAssembly nor
+ * `addModule`, so that engine cannot be ported, only replaced. It is replaced
+ * with the *same font*, pre-rendered per note, so a phone plays the recordings
+ * a browser plays. See `playback/sample-engine.ts` and
+ * `spikes/rn-sample-playback.md`.
  */
-function unavailablePlayback(): PlaybackEngine {
-  const refuse = (): never => {
-    throw new Error('Playback is not available on this platform');
-  };
-  const ignore = (): void => {};
+export function createMusicIo(options: RNMusicIoOptions = {}): MusicIo {
   return {
-    initialize: refuse,
-    loadScore: refuse,
-    play: refuse,
-    noteOn: refuse,
-    pause: ignore,
-    stop: ignore,
-    seek: ignore,
-    setTempoMultiplier: ignore,
-    setLoop: ignore,
-    setTrackMute: ignore,
-    setTrackSolo: ignore,
-    setMetronome: ignore,
-    setMasterVolume: ignore,
-    noteOff: ignore,
-    setObserver: ignore,
-    dispose: ignore,
-  };
-}
-
-export function createMusicIo(): MusicIo {
-  return {
-    // Playback is a browser capability here: it needs the soundfont synth,
-    // which runs in an AudioWorklet. React Native has no equivalent, and the
-    // previous Tone-based engine could not play a soundfont at all.
-    playback: unavailablePlayback(),
+    playback: new RNSamplePlaybackEngine({
+      packBase: options.packBase,
+      percussionBase: options.percussionBase,
+    }),
     xmlParser: new RNXmlParser(),
     // The same codec as web: Standard MIDI File encoding is byte manipulation
     // with no platform APIs in it.
     midiCodec: new ToneJsMidiCodec(),
     modCodec: new SharedModCodec(),
+    // Decoding borrows the OS decoder through `react-native-audio-api`; both
+    // encoders are pure JS in `shared/`.
     audioCodec: createRNAudioCodec(),
-    audioRenderer: {
-      // No audio context here; rendering is a browser capability.
-      render: () => Promise.reject(new Error('Offline audio rendering is not available on this platform')),
-    },
+    // The same samples playback uses, scheduled up front against an
+    // OfflineAudioContext so an export renders as fast as the device manages
+    // rather than in real time. Sharing `PackLibrary` and `planVoice` with the
+    // engine is what keeps the file a recording of what was heard.
+    audioRenderer: createRNSoundfontRenderer({
+      packBase: options.packBase,
+      percussionBase: options.percussionBase,
+    }),
     fileExporter: new RNFileExporter(),
   };
 }

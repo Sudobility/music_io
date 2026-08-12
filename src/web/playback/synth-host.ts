@@ -13,7 +13,7 @@
  * tested against a stub instead of being verifiable only by ear. The
  * percussion guard below is the one that most needs it.
  */
-import { headroomTrimFor, LIMITER_CEILING_DB } from './mix.js';
+import { headroomTrimFor, LIMITER_CEILING_DB } from '../../shared/playback/mix.js';
 import { createWorkletQuietModuleUrl } from './quiet-stub-notices.js';
 
 /** The slice of `AudioWorkletNodeSynthesizer` this host uses. */

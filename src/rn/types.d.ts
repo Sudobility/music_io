@@ -14,20 +14,45 @@
  */
 declare module 'react-native-audio-api' {
   /**
-   * Its Web Audio implementation. Declared rather than installed for the same
-   * reason as the modules below — and because installing it drags React Native
-   * itself into this package's dev tree, where it cannot run anyway.
+   * The shape `decodeAudioData` resolves with: `AudioBuffer`-compatible, which
+   * is what lets `shared/audio/mp3.ts`'s mixdown take it and the browser's
+   * `AudioBuffer` alike.
+   */
+  export interface AudioBuffer {
+    readonly length: number;
+    readonly numberOfChannels: number;
+    readonly sampleRate: number;
+    readonly duration: number;
+    getChannelData(channel: number): Float32Array;
+  }
+
+  /**
+   * Hands the bytes to the OS decoder — AVFoundation on iOS, MediaCodec on
+   * Android — so it reads wav, mp3 and `.mpa` without this package bundling a
+   * decoder, exactly as `AudioContext.decodeAudioData` does on the web.
    *
-   * Only what `playback.rn.ts` touches is declared. Tone is handed this object
-   * as its context, and whether Tone accepts it is the open question recorded
-   * in `spikes/tone-on-rn-audio-api.md`; a wider stub here would imply an
-   * answer nobody has.
+   * Added in 0.13; the peer range says so, and `rn/audio-codec.ts` reports a
+   * missing export as a version problem rather than a mysterious undefined.
+   */
+  export function decodeAudioData(input: ArrayBuffer, sampleRate?: number): Promise<AudioBuffer>;
+
+  /**
+   * The nodes `playback/sample-engine.ts` builds a voice out of.
+   *
+   * Still only what is actually touched. The engine talks to the module through
+   * `playback/audio-api.ts`'s structural types, so this declaration exists to
+   * let the lazy `import('react-native-audio-api')` typecheck, not to describe
+   * the library.
    */
   export class AudioContext {
     readonly currentTime: number;
     readonly destination: unknown;
-    close(): void;
+    readonly sampleRate: number;
+    createGain(): unknown;
+    createBufferSource(): unknown;
+    createOscillator(): unknown;
     resume(): Promise<void>;
+    close(): Promise<void>;
   }
 }
 
