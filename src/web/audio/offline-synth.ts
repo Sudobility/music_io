@@ -16,8 +16,12 @@
  * This one runs on the main thread rather than in a worklet, which is fine
  * precisely because it is offline — there is no audio callback to starve.
  */
+import { CHANNELS_PER_INSTANCE } from '../playback/channel-allocator.js';
 import { seedMainThreadQuietModule } from '../playback/quiet-stub-notices.js';
 import type { SynthesizerLike } from './synth-types.js';
+
+/** Matches playback's ceiling, so an export sounds like what was heard. */
+const OFFLINE_POLYPHONY = 2048;
 
 /** Resolves once `libfluidsynth-*.js` has been loaded and its WASM is ready. */
 let fluidsynthReady: Promise<void> | null = null;
@@ -62,6 +66,13 @@ export type OfflineSynthRequest = {
   fontUrl: string;
   loadFont: (url: string) => Promise<ArrayBuffer>;
   sampleRate: number;
+  /**
+   * Builds the synth. Injected only by tests — the real path first loads
+   * libfluidsynth into the page through a script tag, which a unit test has no
+   * way to satisfy. Supplying this skips that bring-up, the same seam
+   * `SynthHost` exposes for the same reason.
+   */
+  createSynth?: () => SynthesizerLike;
 };
 
 /** The shared offline synth, building it on first use. */
@@ -70,10 +81,22 @@ export async function getOfflineSynth(request: OfflineSynthRequest): Promise<Loa
   if (cached?.key === key) return await cached.synth;
 
   const building = (async (): Promise<LoadedOfflineSynth> => {
-    await ensureFluidsynth(request.fluidsynthModuleUrl);
-    const jsSynth = await import('js-synthesizer');
-    const synth = new jsSynth.Synthesizer() as unknown as SynthesizerLike;
-    synth.init(request.sampleRate);
+    let synth: SynthesizerLike;
+    if (request.createSynth) {
+      synth = request.createSynth();
+    } else {
+      await ensureFluidsynth(request.fluidsynthModuleUrl);
+      const jsSynth = await import('js-synthesizer');
+      synth = new jsSynth.Synthesizer() as unknown as SynthesizerLike;
+    }
+    // The same channel count playback uses, because both share
+    // `allocateChannels`: on a 16-channel synth an export would address
+    // channels that do not exist and silently lose every track past the
+    // sixteenth. Polyphony matches too, so an export sounds like what was heard.
+    synth.init(request.sampleRate, {
+      midiChannelCount: CHANNELS_PER_INSTANCE,
+      polyphony: OFFLINE_POLYPHONY,
+    });
     const sfontId = await synth.loadSFont(await request.loadFont(request.fontUrl));
     return { synth, sfontId, sampleRate: request.sampleRate };
   })();

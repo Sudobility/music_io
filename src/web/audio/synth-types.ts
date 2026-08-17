@@ -7,7 +7,7 @@
  * happens to work by truthiness and is therefore worth stating plainly.
  */
 export type SynthesizerLike = {
-  init(sampleRate: number): void;
+  init(sampleRate: number, settings?: { midiChannelCount?: number; polyphony?: number }): void;
   loadSFont(bin: ArrayBuffer): Promise<number>;
   render(outBuffer: Float32Array[]): void;
   midiNoteOn(chan: number, key: number, vel: number): void;
