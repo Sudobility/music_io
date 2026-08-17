@@ -20,7 +20,7 @@ import type {
   Score,
   ScoreRange,
 } from '@sudobility/music_types';
-import { allocateChannels } from './channel-allocator.js';
+import { allocateChannels, CHANNELS_PER_INSTANCE } from './channel-allocator.js';
 import type { ChannelAssignment } from './channel-allocator.js';
 import { PlaybackClock } from './clock.js';
 import { NoteQueue } from '../../shared/playback/note-queue.js';
@@ -80,7 +80,10 @@ const POSITION_TICK_INTERVAL_MS = 1000 / 30;
 const CC_VOLUME = 7;
 const CC_PAN = 10;
 const MAX_CC = 127;
-const CHANNELS_PER_INSTANCE = 16;
+// `CHANNELS_PER_INSTANCE` is imported from the allocator rather than restated
+// here. A second copy of it went stale the moment the allocator moved to 256:
+// `pickAuditionChannel` searched only channels 15..0, found every one of them
+// taken on a sixteen-track score, and handed auditions a channel a track owned.
 /** General MIDI's drum channel, which an audition must not borrow. */
 const GM_PERCUSSION_CHANNEL = 9;
 /**

@@ -72,6 +72,18 @@ async function hostWith(instanceCount: number) {
   return { host, synths };
 }
 
+describe('SynthHost: synth settings', () => {
+  it('initialises each synth with 256 MIDI channels and a generous voice ceiling', async () => {
+    const { synths } = await hostWith(1);
+    expect(synths[0].calls.init).toEqual([[44100, { midiChannelCount: 256, polyphony: 2048 }]]);
+  });
+
+  it('gives every instance the same settings', async () => {
+    const { synths } = await hostWith(2);
+    expect(synths[1].calls.init).toEqual(synths[0].calls.init);
+  });
+});
+
 describe('SynthHost', () => {
   it('loads the quiet-module seed, then fluidsynth, then the worklet', async () => {
     // Order is the whole contract here. The seed must precede libfluidsynth so

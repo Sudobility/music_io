@@ -77,6 +77,16 @@ describe('allocateChannels: 256 channels per instance', () => {
     for (const a of assignments.values()) expect(a.channel % 16).not.toBe(9);
   });
 
+  it('never sets needsDrumTypeSwitch on a pitched track', () => {
+    // `soundfont-render.ts` branches on `isPercussion || needsDrumTypeSwitch`,
+    // so a pitched track carrying the flag is sent a drum-bank program select
+    // and exports as percussion. It shipped that way for one commit.
+    const { assignments } = allocateChannels([...manyPitched(40), drums('d')]);
+    for (const [id, a] of assignments) {
+      if (id !== 'd') expect(a.needsDrumTypeSwitch).toBe(false);
+    }
+  });
+
   it('fits 240 pitched tracks on one instance, the non-drum channels', () => {
     const { assignments, instanceCount } = allocateChannels(manyPitched(240));
     expect(instanceCount).toBe(1);

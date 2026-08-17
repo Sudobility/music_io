@@ -14,11 +14,25 @@
  * percussion guard below is the one that most needs it.
  */
 import { headroomTrimFor, LIMITER_CEILING_DB } from '../../shared/playback/mix.js';
+import { CHANNELS_PER_INSTANCE } from './channel-allocator.js';
 import { createWorkletQuietModuleUrl } from './quiet-stub-notices.js';
+
+/**
+ * The subset of `js-synthesizer`'s `SynthesizerSettings` this host sets.
+ *
+ * Both are init-time only. `ISynthesizer` exposes `setInterpolation` and
+ * `setGain` and nothing else, so neither can be changed on a running synth.
+ */
+export type SynthSettings = {
+  /** int [16-256], and a multiple of 16. */
+  midiChannelCount?: number;
+  /** int [1-65535]. Above it, fluidsynth steals by its own overflow priority. */
+  polyphony?: number;
+};
 
 /** The slice of `AudioWorkletNodeSynthesizer` this host uses. */
 export type SynthInstance = {
-  init(sampleRate: number): void;
+  init(sampleRate: number, settings?: SynthSettings): void;
   createAudioNode(context: BaseAudioContext, bufferSize: number): AudioNode;
   loadSFont(data: ArrayBuffer): Promise<number>;
   createSequencer?(): Promise<SynthSequencer>;
@@ -53,6 +67,19 @@ export type SynthHostOptions = {
 
 /** Big enough that the worklet is not woken constantly, small enough not to add audible latency. */
 const RENDER_BUFFER_SIZE = 8192;
+
+/** Channels each instance addresses; the allocator's own constant, so the two cannot drift. */
+const MIDI_CHANNEL_COUNT = CHANNELS_PER_INSTANCE;
+/**
+ * The voice ceiling, chosen once at init because fluidsynth exposes no runtime
+ * setter for it.
+ *
+ * Its default of 256 is low for a score with hundreds of parts. Set generously
+ * instead: a voice slot is a small struct, only *sounding* voices cost CPU, and
+ * above the ceiling fluidsynth steals by its own overflow priority — quietest
+ * and oldest first — rather than refusing the newest note.
+ */
+const POLYPHONY = 2048;
 
 /**
  * Where General MIDI keeps its drum kits. Channel 9 is already there in GM
@@ -149,7 +176,7 @@ export class SynthHost {
     if (!context || !soundfont || !this.master) return;
     for (let i = this.synths.length; i < count; i += 1) {
       const synth = await this.deps.createSynth();
-      synth.init(context.sampleRate);
+      synth.init(context.sampleRate, { midiChannelCount: MIDI_CHANNEL_COUNT, polyphony: POLYPHONY });
       synth.createAudioNode(context, RENDER_BUFFER_SIZE).connect(this.master);
       this.sfontIds[i] = await synth.loadSFont(soundfont);
       this.sequencers[i] = await this.createSequencerFor(synth);

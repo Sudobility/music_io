@@ -82,12 +82,13 @@ function scoreOfTracks(count: number, clef: 'treble' | 'percussion' = 'treble'):
 
 describe('instrument routing', () => {
   it('opens as many synths as the allocation needs, not always one', async () => {
-    // Sixteen channels per synth and channel 9 barred to pitched parts, so a
-    // seventeen-part score puts tracks on instance 1. Initialising with one
-    // synth left those tracks addressing `synths[1]`, which does not exist —
-    // they played nothing at all, with no error anywhere.
+    // 240 pitched channels per synth (256 less the sixteen reserved for
+    // percussion), so a 241-part score puts a track on instance 1. Initialising
+    // with one synth left those tracks addressing `synths[1]`, which does not
+    // exist — they played nothing at all, with no error anywhere. The boundary
+    // was seventeen parts when an instance was sixteen channels wide.
     const { host, engine } = engineWith();
-    const score = scoreOfTracks(17);
+    const score = scoreOfTracks(241);
     await engine.loadScore(score);
     await engine.initialize();
 
@@ -98,13 +99,21 @@ describe('instrument routing', () => {
     expect(host.init.mock.calls[0][1].instanceCount).toBe(2);
   });
 
+  it('keeps a seventeen-part score on one synth', async () => {
+    // What used to need two instances, and a second 23MB copy of the soundfont.
+    const { host, engine } = engineWith();
+    await engine.loadScore(scoreOfTracks(17));
+    await engine.initialize();
+    expect(host.init.mock.calls[0][1].instanceCount).toBe(1);
+  });
+
   it('grows the host when a bigger score is loaded after start-up', async () => {
     const { host, engine } = engineWith();
     await engine.loadScore(scoreOfTracks(2));
     await engine.initialize();
     expect(host.init.mock.calls[0][1].instanceCount).toBe(1);
 
-    await engine.loadScore(scoreOfTracks(17));
+    await engine.loadScore(scoreOfTracks(241));
     expect(host.ensureInstances).toHaveBeenCalledWith(2);
   });
 

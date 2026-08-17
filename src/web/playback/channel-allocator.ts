@@ -71,29 +71,35 @@ export function allocateChannels(tracks: readonly AllocatorTrack[]): {
     return null;
   };
 
-  const claim = (id: string, instance: number, channel: number): void => {
+  const claim = (id: string, instance: number, channel: number, isPercussion: boolean): void => {
     taken[instance].add(channel);
     assignments.set(id, {
       instance,
       channel,
-      // Only instance 0's channel 9 is fluidsynth's own drum channel; every
-      // other percussion slot has to be told what it is.
-      needsDrumTypeSwitch: !(instance === 0 && channel === DEFAULT_PERCUSSION_CHANNEL),
+      // False for every pitched track. `soundfont-render.ts` branches on
+      // `track.isPercussion || assignment.needsDrumTypeSwitch`, so a pitched
+      // track carrying this flag would be sent a drum-bank program select and
+      // export as percussion.
+      //
+      // Among percussion, only instance 0's channel 9 is fluidsynth's own drum
+      // channel; every other drum slot has to be told what it is.
+      needsDrumTypeSwitch:
+        isPercussion && !(instance === 0 && channel === DEFAULT_PERCUSSION_CHANNEL),
     });
   };
 
   /** Places `id` on the first instance with a free channel of the wanted kind, opening one if none has. */
-  const place = (id: string, wantDrum: boolean): void => {
+  const place = (id: string, wantDrum: boolean, isPercussion: boolean): void => {
     for (let instance = 0; instance < taken.length; instance += 1) {
       const channel = freeChannel(instance, wantDrum);
       if (channel !== null) {
-        claim(id, instance, channel);
+        claim(id, instance, channel, isPercussion);
         return;
       }
     }
     taken.push(new Set());
     // A fresh instance always has a free channel of either kind.
-    claim(id, taken.length - 1, freeChannel(taken.length - 1, wantDrum)!);
+    claim(id, taken.length - 1, freeChannel(taken.length - 1, wantDrum)!, isPercussion);
   };
 
   // Percussion first, so the drum-capable channels reach the tracks that need
@@ -103,12 +109,12 @@ export function allocateChannels(tracks: readonly AllocatorTrack[]): {
     // Prefer a drum-capable channel; fall back to an ordinary one, switched
     // explicitly, rather than opening an instance for the sake of one channel.
     const hasDrumSlot = taken.some((_, instance) => freeChannel(instance, true) !== null);
-    place(track.id, hasDrumSlot);
+    place(track.id, hasDrumSlot, true);
   }
 
   for (const track of tracks) {
     if (track.isPercussion) continue;
-    place(track.id, false);
+    place(track.id, false, false);
   }
 
   return { assignments, instanceCount: taken.length };
