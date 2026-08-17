@@ -8,6 +8,7 @@
 
 import type { TrackerCell, TrackerInstrument, TrackerModule } from '@sudobility/music_types';
 import { periodToMidi } from './period.js';
+import { applyProTrackerEffect } from '../tracker/protracker-effects.js';
 
 const HEADER_BYTES = 1084;
 const ROWS_PER_PATTERN = 64;
@@ -75,15 +76,8 @@ export function readMod(buffer: ArrayBuffer): TrackerModule {
           // that has them, and the neutral cell carries a note number.
           note: periodToMidi(((b0 & 0x0f) << 8) | b1),
         };
-        // Effect F carries both knobs: at or below 0x1f the parameter is
-        // speed (ticks per row), above it the tempo in BPM.
-        if (effect === 0xf) {
-          if (param <= 0x1f) cell.speed = param;
-          else cell.bpm = param;
-        }
-        // Effect D ends the pattern on this row. Ignored before this, which is
-        // why a module using breaks imported with too many bars.
-        if (effect === 0xd) cell.patternBreak = true;
+        // DSM letters its effects the same way, so this is shared.
+        applyProTrackerEffect(cell, effect, param);
         cells.push(cell);
       }
       rows.push(cells);

@@ -8,11 +8,25 @@
  */
 import type { TrackerCodec, TrackerModule } from '@sudobility/music_types';
 import { readMod } from './read.js';
+import { readDsm } from '../tracker/dsm.js';
+
+function fourCC(bytes: Uint8Array, at: number): string {
+  if (at + 4 > bytes.length) return '';
+  return String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]);
+}
 
 export class SharedTrackerCodec implements TrackerCodec {
+  /**
+   * Chooses a reader by magic bytes, never by file extension.
+   *
+   * A mis-named module still imports, and an unrecognised file fails saying
+   * what was actually at the front of it rather than "parse error".
+   */
   decode(bytes: ArrayBuffer): TrackerModule {
-    // MOD only, for now. The other formats get their own readers behind this
-    // same entry point, selected by magic bytes.
+    const view = new Uint8Array(bytes);
+    if (fourCC(view, 0) === 'RIFF' && fourCC(view, 8) === 'DSMF') return readDsm(bytes);
+    // MOD's magic sits at 1080, past the header, and `readMod` validates it —
+    // so it is the fallback rather than something sniffed twice.
     return readMod(bytes);
   }
 }
