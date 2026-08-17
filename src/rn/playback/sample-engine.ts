@@ -138,6 +138,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
   private readonly voices: Voice[] = [];
   private readonly auditioned = new Map<number, Voice>();
   private activeNoteIds: string[] = [];
+  private activeNotesDirty = false;
 
   constructor(deps: SampleEngineDeps = {}) {
     this.deps = {
@@ -249,13 +250,16 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     this.setState('playing');
     this.stopPump = this.deps.startPump(() => this.pump(), PUMP_INTERVAL_MS);
     this.stopPositionTimer = this.deps.startPump(() => this.reportPosition(), POSITION_TICK_INTERVAL_MS);
+    this.pump();
+    this.reportPosition();
   }
 
   pause(): void {
     if (this.state !== 'playing') return;
-    this.positionTick = this.currentTick();
+    const tick = this.currentTick();
     this.haltPump();
     this.stopAllVoices();
+    this.seek(tick);
     this.setState('paused');
   }
 
@@ -273,6 +277,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     if (this.clickCursor < 0) this.clickCursor = this.clicks.length;
     this.originTick = this.positionTick;
     this.originContextTime = this.ctx?.currentTime ?? 0;
+    this.activeNotesDirty = false;
     this.setActiveNotes([]);
     this.observer?.onPositionTick(this.positionTick);
   }
@@ -329,6 +334,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     }
 
     this.drainThrough(horizonTick, now);
+    this.flushActiveNotes();
 
     if (this.queue.exhausted && this.voices.length === 0 && !this.loop) {
       this.stop();
@@ -386,7 +392,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     const voice = this.buildVoiceFromPlan(buffer, plan, program !== undefined && sustains(program));
     voice.noteId = note.noteId;
     this.voices.push(voice);
-    this.refreshActiveNotes();
+    this.markActiveNotesDirty();
   }
 
   /**
@@ -462,12 +468,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
         changed = true;
       }
     }
-    if (changed) this.refreshActiveNotes();
-  }
-
-  private refreshActiveNotes(): void {
-    const ids = this.voices.map((v) => v.noteId).filter((id): id is string => id !== undefined);
-    this.setActiveNotes(ids);
+    if (changed) this.markActiveNotesDirty();
   }
 
   private setActiveNotes(ids: string[]): void {
@@ -475,6 +476,17 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     if (same) return;
     this.activeNoteIds = ids;
     this.observer?.onActiveNotes(ids);
+  }
+
+  private markActiveNotesDirty(): void {
+    this.activeNotesDirty = true;
+  }
+
+  private flushActiveNotes(): void {
+    if (!this.activeNotesDirty) return;
+    this.activeNotesDirty = false;
+    const ids = this.voices.map((v) => v.noteId).filter((id): id is string => id !== undefined);
+    this.setActiveNotes(ids);
   }
 
   private stopAllVoices(): void {
@@ -487,6 +499,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
       voice.gain.disconnect();
     }
     this.voices.length = 0;
+    this.activeNotesDirty = false;
     this.setActiveNotes([]);
   }
 

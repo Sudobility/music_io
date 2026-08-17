@@ -5,12 +5,16 @@ import { SoundfontPlaybackEngine } from './soundfont-engine.js';
 
 /** Records everything the engine tells the synth host. */
 function stubHost() {
+  const noteOn = vi.fn();
   return {
     init: vi.fn(async () => {}),
     ensureInstances: vi.fn(async () => {}),
     setChannelPercussion: vi.fn(),
     programSelect: vi.fn(),
-    noteOn: vi.fn(),
+    noteOn,
+    noteOnAt: vi.fn((instance: number, channel: number, midi: number, velocity: number, _delaySeconds: number) => {
+      noteOn(instance, channel, midi, velocity);
+    }),
     noteOff: vi.fn(),
     controlChange: vi.fn(),
     allSoundOff: vi.fn(),
@@ -109,6 +113,24 @@ describe('SoundfontPlaybackEngine: loading a score', () => {
     await engine.initialize();
     await engine.loadScore(score);
     expect(host.setTrackCount).toHaveBeenCalledWith(score.tracks.length);
+  });
+
+  it('resets transport position when replacing the loaded score', async () => {
+    const { engine, score } = setup();
+    const ticks: number[] = [];
+    engine.setObserver({
+      onPositionTick: (tick) => ticks.push(tick),
+      onActiveNotes: () => {},
+      onStateChange: () => {},
+    });
+    await engine.initialize();
+    await engine.loadScore(score);
+    engine.seek(score.ppq * 4);
+
+    ticks.length = 0;
+    await engine.loadScore({ ...score, metadata: { ...score.metadata, title: 'Next project' } });
+
+    expect(ticks.at(-1)).toBe(0);
   });
 });
 
@@ -413,6 +435,25 @@ describe('SoundfontPlaybackEngine: transport', () => {
     expect(pump.running).toBe(false);
   });
 
+  it('reports the current tick before pausing so the caret does not jump to the last sample', async () => {
+    const { engine, clock, score } = setup();
+    const ticks: number[] = [];
+    engine.setObserver({
+      onPositionTick: (tick) => ticks.push(tick),
+      onActiveNotes: () => {},
+      onStateChange: () => {},
+    });
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+    ticks.length = 0;
+
+    clock.t = 1;
+    engine.pause();
+
+    expect(ticks.at(-1)).toBeGreaterThan(0);
+  });
+
   it('dispatches notes that have come due, and does not repeat them', async () => {
     const { engine, host, pump, clock, score } = setup();
     await engine.initialize();
@@ -426,6 +467,17 @@ describe('SoundfontPlaybackEngine: transport', () => {
 
     pump.step(); // same position: nothing new is due
     expect(host.noteOn.mock.calls.length).toBe(first);
+  });
+
+  it('hands future lookahead notes to the host with a playback-relative delay', async () => {
+    const score: Score = { ...twoTrackScore(), tempoMap: [{ id: 'fast', tick: 0, bpm: 600 }] };
+    const { engine, host } = setup(score);
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+
+    const delays = host.noteOnAt.mock.calls.map((c) => c[4] as number);
+    expect(delays.some((delay) => delay > 0.05)).toBe(true);
   });
 
   it('starts the piece at its beginning even when the first pump tick is late', async () => {
@@ -446,15 +498,18 @@ describe('SoundfontPlaybackEngine: transport', () => {
     expect(host.noteOn).toHaveBeenCalled();
   });
 
-  it('does not start the clock if playback is stopped before the pump ever runs', async () => {
+  it('does not resurrect playback from a stray pump tick after stop', async () => {
     const { engine, host, pump, clock, score } = setup();
     await engine.initialize();
     await engine.loadScore(score);
     await engine.play();
+    expect(host.noteOn).toHaveBeenCalled();
+
     engine.stop();
+    host.noteOn.mockClear();
 
     clock.t = 5;
-    pump.step(); // a stray tick must not resurrect playback
+    pump.step(); // a stray tick from a stale interval must not resurrect playback
     expect(host.noteOn).not.toHaveBeenCalled();
   });
 
@@ -520,12 +575,12 @@ describe('SoundfontPlaybackEngine: transport', () => {
     await engine.loadScore(score);
     await engine.play();
 
-    clock.t = 60; // a minute into the piece
+    clock.t = 1; // inside the piece, while playback is still running
     pump.step();
     engine.seek(0); // jump back to the top — the audio clock keeps running
 
     ticks.length = 0;
-    clock.t = 60.5;
+    clock.t = 1.5;
     pump.step();
     expect(ticks.length).toBeGreaterThan(0);
   });
@@ -537,6 +592,7 @@ describe('SoundfontPlaybackEngine: transport', () => {
     await engine.play();
 
     engine.seek(score.ppq * 100); // far past every note
+    host.noteOn.mockClear();
     clock.t = 0.1;
     pump.step();
     expect(host.noteOn).not.toHaveBeenCalled();

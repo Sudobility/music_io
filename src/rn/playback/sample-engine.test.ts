@@ -277,12 +277,9 @@ describe('RNSamplePlaybackEngine', () => {
     expect(events.indexOf('state:playing')).toBeGreaterThan(events.indexOf('load:ready'));
   });
 
-  it('schedules the score\'s notes once the pump runs', async () => {
+  it('schedules the score\'s notes as soon as playback starts', async () => {
     await ctx.engine.loadScore(twoTrackScore());
     await ctx.engine.play();
-
-    expect(ctx.graph.sources).toHaveLength(0);
-    ctx.step();
 
     expect(ctx.graph.sources.length).toBeGreaterThan(0);
     // Everything is scheduled ahead of the clock, never behind it.
@@ -392,6 +389,19 @@ describe('RNSamplePlaybackEngine', () => {
     expect(activeNotes.some((ids) => ids.length > 0)).toBe(true);
   });
 
+  it('coalesces active-note updates within one pump pass', async () => {
+    const { observer, activeNotes } = recordingObserver();
+    ctx.engine.setObserver(observer);
+    await ctx.engine.loadScore(twoTrackScore());
+
+    await ctx.engine.play();
+
+    // Two notes start on the downbeat, but the observer sees the pump's final
+    // active-note set once instead of one store update per voice.
+    expect(activeNotes).toHaveLength(1);
+    expect(activeNotes[0]!.length).toBeGreaterThan(1);
+  });
+
   it('reports position while playing', async () => {
     const { observer, ticks } = recordingObserver();
     ctx.engine.setObserver(observer);
@@ -415,6 +425,19 @@ describe('RNSamplePlaybackEngine', () => {
     ctx.step();
 
     expect(ctx.graph.sources).toHaveLength(scheduled); // nothing new dispatched
+  });
+
+  it('reports the current tick before pausing so the caret does not jump to the last sample', async () => {
+    const { observer, ticks } = recordingObserver();
+    ctx.engine.setObserver(observer);
+    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.play();
+    ticks.length = 0;
+
+    ctx.graph.currentTime = 1;
+    ctx.engine.pause();
+
+    expect(ticks.at(-1)).toBeGreaterThan(0);
   });
 
   it('schedules metronome clicks only when the metronome is on', async () => {

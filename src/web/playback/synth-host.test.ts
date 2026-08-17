@@ -1,16 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SynthHost } from './synth-host.js';
-import type { SynthInstance } from './synth-host.js';
+import type { SynthInstance, SynthSequencer } from './synth-host.js';
 
 /** A stand-in for one `AudioWorkletNodeSynthesizer`, recording what it was told. */
-function stubSynth(): SynthInstance & { calls: Record<string, unknown[][]> } {
+function stubSynth(sequencer?: SynthSequencer): SynthInstance & { calls: Record<string, unknown[][]> } {
   const calls: Record<string, unknown[][]> = {};
   const record =
     (name: string) =>
     (...args: unknown[]) => {
       (calls[name] ??= []).push(args);
     };
-  return {
+  const synth: SynthInstance & { calls: Record<string, unknown[][]> } = {
     calls,
     init: record('init'),
     createAudioNode: vi.fn(() => ({ connect: vi.fn() }) as unknown as AudioNode),
@@ -24,6 +24,19 @@ function stubSynth(): SynthInstance & { calls: Record<string, unknown[][]> } {
     setInterpolation: record('setInterpolation'),
     close: record('close'),
   };
+  if (sequencer) synth.createSequencer = vi.fn(async () => sequencer);
+  return synth;
+}
+
+function stubSequencer() {
+  const sequencer: SynthSequencer = {
+    registerSynthesizer: vi.fn(async (_synth: SynthInstance) => 1),
+    setTimeScale: vi.fn((_scale: number) => {}),
+    sendEventAt: vi.fn((_event, _tick: number, _isAbsolute: boolean) => {}),
+    removeAllEvents: vi.fn(() => {}),
+    close: vi.fn(() => {}),
+  };
+  return sequencer;
 }
 
 /** A minimal AudioContext surface: enough for the master chain and nothing more. */
@@ -149,6 +162,35 @@ describe('SynthHost', () => {
     expect(synths[1].calls.midiNoteOn?.[0]).toEqual([4, 60, 100]);
   });
 
+  it('uses the worklet sequencer for delayed note-ons when it exists', async () => {
+    const sequencer = stubSequencer();
+    const synth = stubSynth(sequencer);
+    const host = new SynthHost({ createSynth: () => synth });
+    await host.init(stubContext(), {
+      fluidsynthModuleUrl: 'fluid.js',
+      workletModuleUrl: 'worklet.js',
+      soundfont: new Uint8Array(4).buffer,
+      instanceCount: 1,
+    });
+
+    host.noteOnAt(0, 4, 60, 100, 0.125);
+
+    expect(sequencer.registerSynthesizer).toHaveBeenCalledWith(synth);
+    expect(sequencer.setTimeScale).toHaveBeenCalledWith(1000);
+    expect(sequencer.sendEventAt).toHaveBeenCalledWith(
+      { type: 'noteon', channel: 4, key: 60, vel: 100 },
+      125,
+      false,
+    );
+    expect(synth.calls.midiNoteOn).toBeUndefined();
+  });
+
+  it('falls back to immediate note-ons when no sequencer is available', async () => {
+    const { host, synths } = await hostWith(1);
+    host.noteOnAt(0, 4, 60, 100, 0.125);
+    expect(synths[0].calls.midiNoteOn?.[0]).toEqual([4, 60, 100]);
+  });
+
   it('sends a switched drum channel to the drum bank, not just the drum type', async () => {
     // The type switch alone only routes *later* program changes to the drum
     // bank; the channel keeps its default piano preset. A second drum track
@@ -194,6 +236,21 @@ describe('SynthHost', () => {
     const { host, synths } = await hostWith(2);
     host.allSoundOff();
     for (const s of synths) expect(s.calls.midiAllSoundsOff).toBeDefined();
+  });
+
+  it('cancels queued sequencer events on allSoundOff', async () => {
+    const sequencer = stubSequencer();
+    const host = new SynthHost({ createSynth: () => stubSynth(sequencer) });
+    await host.init(stubContext(), {
+      fluidsynthModuleUrl: 'fluid.js',
+      workletModuleUrl: 'worklet.js',
+      soundfont: new Uint8Array(4).buffer,
+      instanceCount: 1,
+    });
+
+    host.allSoundOff();
+
+    expect(sequencer.removeAllEvents).toHaveBeenCalled();
   });
 
   it('ignores calls for an instance that does not exist rather than throwing', async () => {

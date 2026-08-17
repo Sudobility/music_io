@@ -46,6 +46,7 @@ export type SynthHostLike = {
   setChannelPercussion(instance: number, channel: number, kit?: number): void;
   programSelect(instance: number, channel: number, program: number): void;
   noteOn(instance: number, channel: number, midi: number, velocity: number): void;
+  noteOnAt(instance: number, channel: number, midi: number, velocity: number, delaySeconds: number): void;
   noteOff(instance: number, channel: number, midi: number): void;
   controlChange(instance: number, channel: number, control: number, value: number): void;
   allSoundOff(): void;
@@ -152,6 +153,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   private auditionHeld = new Map<number, ChannelAssignment>();
   /** How many synths the current score's channel assignment needs. */
   private instanceCount = 1;
+  private tempoMultiplier = 1;
   /**
    * The channel auditions borrow — recomputed per score so it is one no track owns.
    *
@@ -291,6 +293,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.queue.load(flattenScoreForPlayback(score));
     this.clicks = metronomeClicks(score);
     this.clickCursor = 0;
+    this.seek(0);
 
     const { assignments, instanceCount } = allocateChannels(
       score.tracks.map((t) => ({ id: t.id, isPercussion: t.clef === 'percussion' })),
@@ -420,8 +423,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.startAtSeconds = null;
     this.clock.pause();
     this.endPump();
-    this.deps.host.allSoundOff();
-    this.clearSounding();
+    this.seek(this.tickForSeconds(this.clock.positionSeconds));
     this.observer?.onStateChange('paused');
   }
 
@@ -461,6 +463,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   }
 
   setTempoMultiplier(multiplier: number): void {
+    this.tempoMultiplier = multiplier;
     this.clock.setRate(multiplier);
   }
 
@@ -539,6 +542,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   private startPump(): void {
     if (this.stopPump) return;
     this.stopPump = this.deps.startPump(() => this.tick(), PUMP_INTERVAL_MS);
+    this.tick();
   }
 
   private endPump(): void {
@@ -572,20 +576,21 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.applyLoop(position);
     this.releaseDue(position);
 
-    const untilSeconds = position + LOOKAHEAD_SECONDS;
+    const speed = this.playbackSpeed;
+    const untilSeconds = position + LOOKAHEAD_SECONDS * speed;
     const drained = this.queue.drainUntil(this.tickForSeconds(untilSeconds));
     const { due } = planDispatch({
       notes: drained,
       secondsForTick: (tick) => this.secondsForTick(tick),
       positionSeconds: position,
-      graceSeconds: GRACE_SECONDS,
+      graceSeconds: GRACE_SECONDS * speed,
     });
 
-    for (const { note } of due) {
+    for (const { note, atSeconds } of due) {
       const state = this.tracks.get(note.trackId);
       if (!state) continue;
       const { instance, channel } = state.assignment;
-      this.deps.host.noteOn(instance, channel, note.midi, note.velocity);
+      this.deps.host.noteOnAt(instance, channel, note.midi, note.velocity, (atSeconds - position) / speed);
       this.activeNoteIds.add(note.noteId);
       this.pendingOffs.push({
         atSeconds: this.secondsForTick(note.tick + note.durTicks),
@@ -630,13 +635,22 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
       if (atSeconds > untilSeconds) break;
       this.clickCursor += 1;
       if (atSeconds < position) continue; // already gone by; do not stack it up
-      scheduleClick(this.context, this.context.destination, atSeconds, click.accent);
+      scheduleClick(
+        this.context,
+        this.context.destination,
+        this.now() + Math.max(0, (atSeconds - position) / this.playbackSpeed),
+        click.accent,
+      );
     }
   }
 
   /** Inverse of `secondsForTick`, for turning the lookahead window back into ticks. */
   private tickForSeconds(seconds: number): number {
     return this.tempoMap.secondsToTicks(seconds);
+  }
+
+  private get playbackSpeed(): number {
+    return this.tempoMultiplier > 0 ? this.tempoMultiplier : 1;
   }
 
   private releaseDue(position: number): void {

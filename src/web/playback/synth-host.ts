@@ -21,6 +21,7 @@ export type SynthInstance = {
   init(sampleRate: number): void;
   createAudioNode(context: BaseAudioContext, bufferSize: number): AudioNode;
   loadSFont(data: ArrayBuffer): Promise<number>;
+  createSequencer?(): Promise<SynthSequencer>;
   midiNoteOn(channel: number, midi: number, velocity: number): void;
   midiNoteOff(channel: number, midi: number): void;
   midiProgramSelect(channel: number, sfontId: number, bank: number, preset: number): void;
@@ -28,6 +29,18 @@ export type SynthInstance = {
   midiSetChannelType(channel: number, isDrum: boolean): void;
   midiAllSoundsOff(channel?: number): void;
   setInterpolation(order: number): void;
+  close(): void;
+};
+
+export type SynthSequencer = {
+  registerSynthesizer(synth: SynthInstance): Promise<number>;
+  setTimeScale(scale: number): void;
+  sendEventAt(
+    event: { type: 'noteon'; channel: number; key: number; vel: number },
+    tick: number,
+    isAbsolute: boolean,
+  ): void;
+  removeAllEvents(): void;
   close(): void;
 };
 
@@ -53,6 +66,7 @@ const PERCUSSION_CHANNEL = 9;
 
 export class SynthHost {
   private synths: SynthInstance[] = [];
+  private sequencers: Array<SynthSequencer | null> = [];
   private sfontIds: number[] = [];
   /** `instance:channel` for every channel that is percussion — see `programSelect`. */
   private percussionChannels = new Set<string>();
@@ -138,9 +152,24 @@ export class SynthHost {
       synth.init(context.sampleRate);
       synth.createAudioNode(context, RENDER_BUFFER_SIZE).connect(this.master);
       this.sfontIds[i] = await synth.loadSFont(soundfont);
+      this.sequencers[i] = await this.createSequencerFor(synth);
       // The governor speaks for every instance, and it may already have spoken.
       if (this.interpolation !== null) synth.setInterpolation(this.interpolation);
       this.synths[i] = synth;
+    }
+  }
+
+  private async createSequencerFor(synth: SynthInstance): Promise<SynthSequencer | null> {
+    if (!synth.createSequencer) return null;
+    try {
+      const sequencer = await synth.createSequencer();
+      await sequencer.registerSynthesizer(synth);
+      sequencer.setTimeScale(1000);
+      return sequencer;
+    } catch {
+      // Timed dispatch is an optimisation. If the worklet sequencer is not
+      // available, immediate MIDI calls still play correctly.
+      return null;
     }
   }
 
@@ -212,6 +241,19 @@ export class SynthHost {
     this.synths[instance]?.midiNoteOn(channel, midi, velocity);
   }
 
+  noteOnAt(instance: number, channel: number, midi: number, velocity: number, delaySeconds: number): void {
+    const sequencer = this.sequencers[instance];
+    if (!sequencer) {
+      this.noteOn(instance, channel, midi, velocity);
+      return;
+    }
+    sequencer.sendEventAt(
+      { type: 'noteon', channel, key: midi, vel: velocity },
+      Math.max(0, delaySeconds * 1000),
+      false,
+    );
+  }
+
   noteOff(instance: number, channel: number, midi: number): void {
     this.synths[instance]?.midiNoteOff(channel, midi);
   }
@@ -222,6 +264,7 @@ export class SynthHost {
 
   /** Silences everything immediately — stop, seek, and panic all go through here. */
   allSoundOff(): void {
+    for (const sequencer of this.sequencers) sequencer?.removeAllEvents();
     for (const synth of this.synths) synth.midiAllSoundsOff();
   }
 
@@ -247,8 +290,10 @@ export class SynthHost {
   }
 
   dispose(): void {
+    for (const sequencer of this.sequencers) sequencer?.close();
     for (const synth of this.synths) synth.close();
     this.synths = [];
+    this.sequencers = [];
     this.sfontIds = [];
     this.percussionChannels.clear();
     this.master = null;

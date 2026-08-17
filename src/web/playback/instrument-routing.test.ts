@@ -13,12 +13,16 @@ import { SoundfontPlaybackEngine } from './soundfont-engine.js';
 import { allocateChannels } from './channel-allocator.js';
 
 function stubHost() {
+  const noteOn = vi.fn();
   return {
     init: vi.fn(async (_context: BaseAudioContext, _options: { instanceCount: number }) => {}),
     ensureInstances: vi.fn(async () => {}),
     setChannelPercussion: vi.fn(),
     programSelect: vi.fn(),
-    noteOn: vi.fn(),
+    noteOn,
+    noteOnAt: vi.fn((instance: number, channel: number, midi: number, velocity: number, _delaySeconds: number) => {
+      noteOn(instance, channel, midi, velocity);
+    }),
     noteOff: vi.fn(),
     controlChange: vi.fn(),
     allSoundOff: vi.fn(),
