@@ -93,12 +93,52 @@ on both platforms.
   deleted synthesised oscillator approximations, which is a different and much
   worse thing. See `spikes/rn-sample-playback.md`.
 - **The transport is shared; only voicing is per platform.** `shared/playback/`
-  holds score flattening, the note cursor, the dispatch window and the master
-  trim, and both engines run it. `governor.ts` and `channel-allocator.ts`
+  holds score flattening, the note cursor, the sounding set, the dispatch window
+  and the master trim. `governor.ts` and `channel-allocator.ts`
   stayed in `web/` despite importing nothing — they are fluidsynth-specific in
-  meaning (interpolation orders; 16 channels per synth instance) — and
+  meaning (interpolation orders; channels per synth instance) — and
   `soundfont-loader.ts` stayed because it uses the browser `caches` global.
   Import-free is not the same as platform-free.
+- **`pump-window.ts` has one consumer left, and it is the RN engine.** The web
+  engine hands a four-second horizon of self-releasing notes to the fluidsynth
+  sequencer, so nothing there is ever dispatched late enough to need skipping.
+  RN has no sequencer to hand a horizon to and keeps the lookahead-and-grace
+  model, which is also why `NoteQueue.drainUntil`'s cap is optional: the web
+  engine passes one because every note it schedules is a `postMessage`, and RN
+  posts nothing across a thread boundary so it has nothing to bound.
+- **One synth instance addresses 256 channels, not 16.** `midiChannelCount`
+  takes 16-256 in multiples of 16, so every score up to 240 pitched tracks runs
+  on one instance with one copy of the 23MB font. A second instance — and a
+  second font copy — now opens past 240 tracks rather than past 15. Channels
+  where `c % 16 === 9` are reserved for percussion: only literal channel 9 is
+  documented as drum-typed by default, and whether fluidsynth extends that past
+  its first block cannot be determined without a real synth, so pitched tracks
+  stay off all of them. **`needsDrumTypeSwitch` must be false for a pitched
+  track** — `soundfont-render.ts` branches on
+  `isPercussion || needsDrumTypeSwitch`, so a pitched track carrying it exports
+  as percussion. That shipped for one commit.
+- **Polyphony is init-time only.** `ISynthesizer` has `setInterpolation` and
+  `setGain` and no polyphony setter, so the ceiling (2048) is chosen once in
+  `synth-host.ts` and fluidsynth's overflow priority steals above it. Anything
+  proposing to adapt polyphony at runtime is proposing to re-init the synth,
+  which means reloading the font.
+- **The offline renderer shares `allocateChannels` with playback.** Change the
+  channel count and `audio/offline-synth.ts` must move in the same commit, or an
+  export addresses channels its synth does not have and silently loses every
+  track past the sixteenth.
+- **Timing lives in the worklet.** The pump tops up a rolling horizon
+  (`HORIZON_SECONDS`, 512 events per tick) and each note is one sequencer event
+  carrying its own duration, so fluidsynth releases it on the audio thread.
+  There is no grace window and no skip-late rule on the web engine; a note whose
+  moment passed during a stall sounds at once rather than being dropped. The old
+  200ms window plus 200ms grace meant a stall over ~400ms silently lost every
+  note inside it, and a 200-track notation redraw measures 119ms. Do not
+  reintroduce a skip rule without re-reading that.
+- **`onActiveNotes` fires only on change** (`shared/playback/sounding-set.ts`).
+  It used to be a fresh array every pump tick whether or not a note had begun or
+  ended, waking notation colour and the keyboard's key lights twenty times a
+  second through a held chord. Anything that starts re-sending it per tick has
+  undone the reason that module exists.
 - **The RN engine deliberately does not reuse the web engine's pump.** Merging
   the two transports behind a synth port is the obvious refactor and the wrong
   order: the web engine is verified on real devices and the RN one cannot be
