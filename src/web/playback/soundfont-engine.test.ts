@@ -703,3 +703,71 @@ describe('SoundfontPlaybackEngine: scheduling horizon', () => {
     expect(host.noteAt.mock.calls.length).toBeLessThanOrEqual(512);
   });
 });
+
+describe('SoundfontPlaybackEngine: sounding notes', () => {
+  function observed() {
+    const onActiveNotes = vi.fn();
+    return {
+      onActiveNotes,
+      observer: { onPositionTick: vi.fn(), onActiveNotes, onStateChange: vi.fn() },
+    };
+  }
+
+  it('reports sounding notes only when they change', async () => {
+    const { engine, pump, clock, score } = setup();
+    const { onActiveNotes, observer } = observed();
+    engine.setObserver(observer);
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+    pump.step();
+
+    const afterFirst = onActiveNotes.mock.calls.length;
+    // Three ticks well inside the first note, during which nothing starts or ends.
+    clock.t += 0.01;
+    pump.step();
+    clock.t += 0.01;
+    pump.step();
+    clock.t += 0.01;
+    pump.step();
+
+    expect(onActiveNotes.mock.calls.length).toBe(afterFirst);
+  });
+
+  it('stops reporting a note once it has ended', async () => {
+    // Nothing asserted this before: the set was fed by note-offs the pump fired
+    // itself, and when those moved to the worklet it silently only ever grew.
+    const { engine, pump, clock, score } = setup();
+    const { onActiveNotes, observer } = observed();
+    engine.setObserver(observer);
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+
+    let sawSounding = false;
+    for (let i = 0; i < 100; i += 1) {
+      pump.step();
+      const last = onActiveNotes.mock.calls.at(-1)?.[0] as string[] | undefined;
+      if (last && last.length > 0) sawSounding = true;
+      if (sawSounding && last && last.length === 0) break;
+      clock.t += 0.1;
+    }
+
+    expect(sawSounding).toBe(true);
+    expect(onActiveNotes.mock.calls.at(-1)?.[0]).toEqual([]);
+  });
+
+  it('clears the sounding set on a seek, matching the synth being silenced', async () => {
+    const { engine, pump, score } = setup();
+    const { onActiveNotes, observer } = observed();
+    engine.setObserver(observer);
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+    pump.step();
+
+    onActiveNotes.mockClear();
+    engine.seek(score.ppq * 2);
+    expect(onActiveNotes).toHaveBeenCalledWith([]);
+  });
+});

@@ -26,6 +26,7 @@ import { allocateChannels, CHANNELS_PER_INSTANCE } from './channel-allocator.js'
 import type { ChannelAssignment } from './channel-allocator.js';
 import { PlaybackClock } from './clock.js';
 import { NoteQueue } from '../../shared/playback/note-queue.js';
+import { SoundingSet } from '../../shared/playback/sounding-set.js';
 import { scheduleClick } from './click.js';
 import { Governor } from './governor.js';
 import { flattenScoreForPlayback, metronomeClicks } from '../../shared/playback/schedule.js';
@@ -147,7 +148,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   private tracks = new Map<string, TrackState>();
   private observer: PlaybackObserver | null = null;
   private stopPump: (() => void) | null = null;
-  private activeNoteIds = new Set<string>();
+  private readonly sounding = new SoundingSet();
   /**
    * When the last note of the loaded score finishes.
    *
@@ -328,6 +329,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
       (end, n) => Math.max(end, this.secondsForTick(n.tick + n.durTicks)),
       0,
     );
+    this.sounding.load(notes, (tick) => this.secondsForTick(tick));
     this.clicks = metronomeClicks(score);
     this.clickCursor = 0;
     this.seek(0);
@@ -469,7 +471,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.clock.stop();
     this.endPump();
     this.deps.host.allSoundOff();
-    this.clearSounding();
+    this.clearSounding(0);
     this.queue.seekToTick(0);
     this.clickCursor = 0;
     this.observer?.onPositionTick(0);
@@ -483,7 +485,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.clickCursor = this.clicks.findIndex((c) => c.tick >= tick);
     if (this.clickCursor < 0) this.clickCursor = this.clicks.length;
     this.deps.host.allSoundOff();
-    this.clearSounding();
+    this.clearSounding(seconds);
 
     // Report where we landed. Nothing else writes the store's position —
     // `PlaybackController.seek` only forwards here — so a seek made while
@@ -571,7 +573,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.score = null;
     this.observer = null;
     this.initialized = false;
-    this.clearSounding();
+    this.clearSounding(0);
   }
 
   // ---- the pump ------------------------------------------------------------
@@ -704,17 +706,20 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
    * pump's back.
    */
   private report(position: number): void {
+    const sounding = this.sounding.advanceTo(position);
+    if (sounding) this.observer?.onActiveNotes(sounding);
+
     const nowMs = position * 1000;
     if (nowMs - this.lastReportedAt < POSITION_TICK_INTERVAL_MS) return;
     this.lastReportedAt = nowMs;
     this.observer?.onPositionTick(Math.max(0, Math.round(this.tickForSeconds(position))));
-    this.observer?.onActiveNotes([...this.activeNoteIds]);
   }
 
-  private clearSounding(): void {
-    if (this.activeNoteIds.size === 0) return;
-    this.activeNoteIds.clear();
-    this.observer?.onActiveNotes([]);
+  /** Drops the sounding set and says so, for a seek, stop or teardown. */
+  private clearSounding(atSeconds: number): void {
+    const had = this.sounding.size > 0;
+    this.sounding.reset(atSeconds);
+    if (had) this.observer?.onActiveNotes([]);
   }
 }
 
