@@ -9,7 +9,7 @@
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "@sudobility/music_lib": "^1.7.34",
+        "@sudobility/music_lib": "^1.7.35",
         "@sudobility/music_types": "^0.11.18",
         "@tonejs/midi": "^2.0.28",
         "@typescript-eslint/eslint-plugin": "^8.65.0",
@@ -25,7 +25,7 @@
         "vitest": "^4.1.10",
       },
       "peerDependencies": {
-        "@sudobility/music_lib": "^1.7.34",
+        "@sudobility/music_lib": "^1.7.35",
         "@sudobility/music_types": "^0.11.18",
         "@tonejs/midi": "^2.0.28",
         "fast-xml-parser": ">=5.0.0",
@@ -146,7 +146,7 @@
 
     "@sudobility/music_client": ["@sudobility/music_client@0.1.1", "", { "dependencies": { "@sudobility/music_types": "^0.1.0" }, "peerDependencies": { "@sudobility/di": "^1.5.58", "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5", "react": ">=18" } }, "sha512-aHSfqHcmzlyRH7ZEAFV8tL2ZSJjxLzYTpexC3wNNCWQz0BOKEE4LH8WDRhx87Kl1Jl70ewl2ubO3XbzhzRsZwA=="],
 
-    "@sudobility/music_lib": ["@sudobility/music_lib@1.7.34", "", { "dependencies": { "immer": "^10.0.0 || ^11.0.0", "vexflow": "^4.2.5", "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/music_client": "^0.4.18", "@sudobility/music_types": "^0.11.18", "@tanstack/react-query": ">=5", "react": ">=18", "zustand": ">=5" } }, "sha512-sosXNyvC9zxysLdKPyzCdBUiHjwUtPqM659xtHOSFMfNlbDRi619TFGYvsaXfyZbF3oOy6/8OmjgKBhWNzDZuw=="],
+    "@sudobility/music_lib": ["@sudobility/music_lib@1.7.35", "", { "dependencies": { "immer": "^10.0.0 || ^11.0.0", "vexflow": "^4.2.5", "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/music_client": "^0.4.18", "@sudobility/music_types": "^0.11.18", "@tanstack/react-query": ">=5", "react": ">=18", "zustand": ">=5" } }, "sha512-+4wGdXpF+ed0YnsHQssP6JpjeE9657P5ZNmIJBdY533rFo7iGGxtKgfrrMwbSJhIjTP5dIPCzzJWGnMfgUMcIA=="],
 
     "@sudobility/music_types": ["@sudobility/music_types@0.11.18", "", { "dependencies": { "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/types": "^1.9.65" } }, "sha512-+GI4umRaGP27h5O26BE95vDFR+ewB9iq93BvPE05souWmc0TLjR6ng4Y2YTvyshUG2ccmV3kbxY9o/1jRTb8Hw=="],
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SharedTrackerCodec } from './codec.js';
 import { buildMod } from './fixture.js';
 import { buildDsm } from '../tracker/dsm-fixture.js';
+import { buildS3m } from '../tracker/s3m-fixture.js';
 
 describe('SharedTrackerCodec', () => {
   const codec = new SharedTrackerCodec();
@@ -18,6 +19,10 @@ describe('SharedTrackerCodec', () => {
     // A mis-named file still imports; that is the whole reason for sniffing.
     expect(codec.decode(buildDsm({})).format).toBe('dsm');
     expect(codec.decode(buildMod({})).format).toBe('mod');
+  });
+
+  it('decodes a Scream Tracker module', () => {
+    expect(codec.decode(buildS3m({ title: 'Portal' })).format).toBe('s3m');
   });
 
   it('names what it found when it recognises nothing', () => {

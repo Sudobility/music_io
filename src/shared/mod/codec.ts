@@ -9,6 +9,7 @@
 import type { TrackerCodec, TrackerModule } from '@sudobility/music_types';
 import { readMod } from './read.js';
 import { readDsm } from '../tracker/dsm.js';
+import { readS3m } from '../tracker/s3m.js';
 
 function fourCC(bytes: Uint8Array, at: number): string {
   if (at + 4 > bytes.length) return '';
@@ -25,6 +26,7 @@ export class SharedTrackerCodec implements TrackerCodec {
   decode(bytes: ArrayBuffer): TrackerModule {
     const view = new Uint8Array(bytes);
     if (fourCC(view, 0) === 'RIFF' && fourCC(view, 8) === 'DSMF') return readDsm(bytes);
+    if (fourCC(view, 44) === 'SCRM') return readS3m(bytes);
     // MOD's magic sits at 1080, past the header, and `readMod` validates it —
     // so it is the fallback rather than something sniffed twice.
     return readMod(bytes);

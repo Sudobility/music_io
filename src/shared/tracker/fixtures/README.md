@@ -18,6 +18,20 @@ Prefer the smallest file that exercises a format when adding to this directory.
 | --- | --- | --- | --- | --- |
 | `race_against_time.dsm` | DSM | Race against time | flying_tigers | 214766 |
 | `1995.mod` | MOD | 1995 | — | 80555 |
+| `moving_that_rhythm.s3m` | S3M | S3M --> moving that rhythm | — | 69391 |
+| `portal_to_hell.s3m` | S3M | Portal to hell | — | 54606 |
+
+**`portal_to_hell.s3m` is kept for a specific reason, not as another sample.**
+Every one of its 31 patterns yields 62-63 rows rather than 64, and most run one
+byte past their declared length — the writer omits trailing empty rows and
+sometimes the final terminator. It is the regression test for that handling: a
+decoder written from the S3M specification rejects this file outright. It also
+sets a speed of 1, which is what exposed `effectiveBpm` producing 750 BPM and
+failing validation.
+
+`moving_that_rhythm.s3m` decodes perfectly and is kept for the opposite reason:
+it enables 16 channels in its header while its patterns only reach 0-8, which is
+what pins the channel-width rule.
 
 Downloadable from `https://api.modarchive.org/downloads.php?moduleid=<id>`.
 
