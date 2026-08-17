@@ -3,7 +3,7 @@ import type {
   AudioRenderer,
   FileExporter,
   MidiCodec,
-  ModCodec,
+  TrackerCodec,
   PlaybackEngine,
   XmlParser,
 } from '@sudobility/music_types';
@@ -17,7 +17,8 @@ export type MusicIo = {
   playback: PlaybackEngine;
   xmlParser: XmlParser;
   midiCodec: MidiCodec;
-  modCodec: ModCodec;
+  /** Named `modCodec` still, for now: renaming it reaches into music_app and belongs with the change that widens the accepted extensions. */
+  modCodec: TrackerCodec;
   audioCodec: AudioCodec;
   audioRenderer: AudioRenderer;
   fileExporter: FileExporter;

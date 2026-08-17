@@ -6,7 +6,7 @@
 import { RNXmlParser } from './xml/xml.rn.js';
 import { RNFileExporter } from './file/file.rn.js';
 import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
-import { SharedModCodec } from '../shared/mod/codec.js';
+import { SharedTrackerCodec } from '../shared/mod/codec.js';
 import { createRNAudioCodec } from './audio-codec.js';
 import { RNSamplePlaybackEngine } from './playback/sample-engine.js';
 import { createRNSoundfontRenderer } from './audio/offline-render.js';
@@ -62,7 +62,7 @@ export function createMusicIo(options: RNMusicIoOptions = {}): MusicIo {
     // The same codec as web: Standard MIDI File encoding is byte manipulation
     // with no platform APIs in it.
     midiCodec: new ToneJsMidiCodec(),
-    modCodec: new SharedModCodec(),
+    modCodec: new SharedTrackerCodec(),
     // Decoding borrows the OS decoder through `react-native-audio-api`; both
     // encoders are pure JS in `shared/`.
     audioCodec: createRNAudioCodec(),

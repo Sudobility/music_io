@@ -5,7 +5,7 @@
 import { WebXmlParser } from './xml/xml.web.js';
 import { WebFileExporter } from './file/file.web.js';
 import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
-import { SharedModCodec } from '../shared/mod/codec.js';
+import { SharedTrackerCodec } from '../shared/mod/codec.js';
 import { createWebAudioCodec } from './audio/web-audio-codec.js';
 import { createSoundfontRenderer } from './audio/soundfont-render.js';
 import { SoundfontPlaybackEngine } from './playback/soundfont-engine.js';
@@ -65,7 +65,7 @@ export function createMusicIo({
     }),
     xmlParser: new WebXmlParser(),
     midiCodec: new ToneJsMidiCodec(),
-    modCodec: new SharedModCodec(),
+    modCodec: new SharedTrackerCodec(),
     audioCodec: createWebAudioCodec(),
     // Export goes through the same soundfont as playback, so the two cannot drift.
     audioRenderer: {

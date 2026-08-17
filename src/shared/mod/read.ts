@@ -6,7 +6,8 @@
  * score model in the way.
  */
 
-import type { ModCell, ModFile, ModSample } from '@sudobility/music_types';
+import type { TrackerCell, TrackerInstrument, TrackerModule } from '@sudobility/music_types';
+import { periodToMidi } from './period.js';
 
 const HEADER_BYTES = 1084;
 const ROWS_PER_PATTERN = 64;
@@ -34,7 +35,7 @@ function ascii(bytes: Uint8Array, at: number, len: number): string {
   return out.trim();
 }
 
-export function readMod(buffer: ArrayBuffer): ModFile {
+export function readMod(buffer: ArrayBuffer): TrackerModule {
   const bytes = new Uint8Array(buffer);
   if (bytes.length < HEADER_BYTES) throw new Error('Not a ProTracker module: file is too short');
 
@@ -42,9 +43,9 @@ export function readMod(buffer: ArrayBuffer): ModFile {
   const channels = MAGIC_CHANNELS[magic];
   if (!channels) throw new Error(`Not a ProTracker module: unrecognised signature "${magic}"`);
 
-  const samples: ModSample[] = [];
+  const instruments: TrackerInstrument[] = [];
   for (let i = 0; i < 31; i += 1) {
-    samples.push({ index: i + 1, name: ascii(bytes, 20 + i * 30, 22) });
+    instruments.push({ index: i + 1, name: ascii(bytes, 20 + i * 30, 22) });
   }
 
   const songLength = Math.min(bytes[950], 128);
@@ -53,30 +54,42 @@ export function readMod(buffer: ArrayBuffer): ModFile {
 
   // Patterns are not counted in the header; the highest order entry implies it.
   const patternCount = order.length === 0 ? 0 : Math.max(...order) + 1;
-  const patterns: ModCell[][][] = [];
+  const patterns: TrackerCell[][][] = [];
   for (let p = 0; p < patternCount; p += 1) {
-    const rows: ModCell[][] = [];
+    const rows: TrackerCell[][] = [];
     for (let row = 0; row < ROWS_PER_PATTERN; row += 1) {
-      const cells: ModCell[] = [];
+      const cells: TrackerCell[] = [];
       for (let ch = 0; ch < channels; ch += 1) {
         const at = HEADER_BYTES + (p * ROWS_PER_PATTERN * channels + row * channels + ch) * 4;
         const b0 = bytes[at] ?? 0;
         const b1 = bytes[at + 1] ?? 0;
         const b2 = bytes[at + 2] ?? 0;
         const b3 = bytes[at + 3] ?? 0;
-        cells.push({
+        const effect = b2 & 0x0f;
+        const param = b3;
+        const cell: TrackerCell = {
           // The sample number spans both bytes' high nibbles — the classic
           // place this parser goes wrong for samples above 15.
-          sample: (b0 & 0xf0) | (b2 >> 4),
-          period: ((b0 & 0x0f) << 8) | b1,
-          effect: b2 & 0x0f,
-          param: b3,
-        });
+          instrument: (b0 & 0xf0) | (b2 >> 4),
+          // Periods are converted here, not downstream: MOD is the only format
+          // that has them, and the neutral cell carries a note number.
+          note: periodToMidi(((b0 & 0x0f) << 8) | b1),
+        };
+        // Effect F carries both knobs: at or below 0x1f the parameter is
+        // speed (ticks per row), above it the tempo in BPM.
+        if (effect === 0xf) {
+          if (param <= 0x1f) cell.speed = param;
+          else cell.bpm = param;
+        }
+        // Effect D ends the pattern on this row. Ignored before this, which is
+        // why a module using breaks imported with too many bars.
+        if (effect === 0xd) cell.patternBreak = true;
+        cells.push(cell);
       }
       rows.push(cells);
     }
     patterns.push(rows);
   }
 
-  return { title: ascii(bytes, 0, 20), channels, samples, order, patterns };
+  return { format: 'mod', title: ascii(bytes, 0, 20), channels, instruments, order, patterns };
 }
