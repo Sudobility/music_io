@@ -1,11 +1,11 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.7.10",
+  "version": "0.7.11",
   "author": "Sudobility",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sudobility/music_lib": "^1.7.27",
-    "@sudobility/music_types": "^0.11.15",
+    "@sudobility/music_lib": "^1.7.28",
+    "@sudobility/music_types": "^0.11.16",
     "@tonejs/midi": "^2.0.28",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
@@ -20,8 +20,8 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
-    "@sudobility/music_lib": "^1.7.27",
-    "@sudobility/music_types": "^0.11.15",
+    "@sudobility/music_lib": "^1.7.28",
+    "@sudobility/music_types": "^0.11.16",
     "@tonejs/midi": "^2.0.28",
     "fast-xml-parser": ">=5.0.0",
     "js-synthesizer": "^1.13.0",
