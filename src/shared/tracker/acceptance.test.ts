@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { SharedTrackerCodec } from '../mod/codec.js';
 import { readS3m } from './s3m.js';
+import { readXm } from './xm.js';
 
 const DIR = new URL('./fixtures/', import.meta.url).pathname;
 
@@ -67,5 +68,39 @@ describe('S3M real-world quirks', () => {
       .filter((n): n is number => typeof n === 'number');
     expect(Math.min(...notes)).toBeGreaterThanOrEqual(24);
     expect(Math.max(...notes)).toBeLessThanOrEqual(108);
+  });
+});
+
+describe('XM real-world findings', () => {
+  const load = (name: string) => {
+    const buf = readFileSync(`${DIR}${name}`);
+    return readXm(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
+  };
+
+  it('reads every instrument past the empty ones', () => {
+    // sunlight.xm has eight instruments with no samples among fifteen. A reader
+    // assuming a 263-byte header loses everything after the first of them.
+    const xm = load('sunlight.xm');
+    expect(xm.instruments).toHaveLength(15);
+    expect(xm.instruments.filter((i) => i.name.length > 0).length).toBeGreaterThan(1);
+  });
+
+  it('gives each pattern its own row count', () => {
+    const xm = load('dr_wily.xm');
+    const lengths = new Set(xm.patterns.map((p) => p.length));
+    expect(lengths.has(64)).toBe(true);
+    expect(lengths.has(76)).toBe(true);
+  });
+
+  it('gives an empty pattern its declared rows rather than none', () => {
+    const xm = load('dr_wily.xm');
+    for (const pattern of xm.patterns) expect(pattern.length).toBeGreaterThan(0);
+  });
+
+  it('finds key offs, which no earlier format had in a real file', () => {
+    const offs = load('sunlight.xm')
+      .patterns.flat(2)
+      .filter((c) => c.note === 'off');
+    expect(offs.length).toBeGreaterThan(0);
   });
 });

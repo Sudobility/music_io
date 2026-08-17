@@ -20,6 +20,8 @@ Prefer the smallest file that exercises a format when adding to this directory.
 | `1995.mod` | MOD | 1995 | — | 80555 |
 | `moving_that_rhythm.s3m` | S3M | S3M --> moving that rhythm | — | 69391 |
 | `portal_to_hell.s3m` | S3M | Portal to hell | — | 54606 |
+| `sunlight.xm` | XM | \|- sunlight -\| | — | 142447 |
+| `dr_wily.xm` | XM | Dr Wily.... | Felix Lindgren | 58823 |
 
 **`portal_to_hell.s3m` is kept for a specific reason, not as another sample.**
 Every one of its 31 patterns yields 62-63 rows rather than 64, and most run one
@@ -32,6 +34,15 @@ failing validation.
 `moving_that_rhythm.s3m` decodes perfectly and is kept for the opposite reason:
 it enables 16 channels in its header while its patterns only reach 0-8, which is
 what pins the channel-width rule.
+
+**The two XM files also earn their places separately.** `sunlight.xm` has eight
+instruments with no samples among its fifteen, so its instrument headers are a
+mix of 33 and 263 bytes — a reader assuming the larger loses everything after
+the first empty slot. `dr_wily.xm` holds a 76-row pattern among its 64s and four
+patterns with no packed data at all, which is what pins the per-pattern row
+count and the blank-pattern handling. Two larger XMs (`mercury.xm` 1.1 MB and
+`1funk.xm` 777 KB) were measured while designing the decoder but cover nothing
+these two do not.
 
 Downloadable from `https://api.modarchive.org/downloads.php?moduleid=<id>`.
 

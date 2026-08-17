@@ -3,6 +3,7 @@ import { SharedTrackerCodec } from './codec.js';
 import { buildMod } from './fixture.js';
 import { buildDsm } from '../tracker/dsm-fixture.js';
 import { buildS3m } from '../tracker/s3m-fixture.js';
+import { buildXm } from '../tracker/xm-fixture.js';
 
 describe('SharedTrackerCodec', () => {
   const codec = new SharedTrackerCodec();
@@ -23,6 +24,10 @@ describe('SharedTrackerCodec', () => {
 
   it('decodes a Scream Tracker module', () => {
     expect(codec.decode(buildS3m({ title: 'Portal' })).format).toBe('s3m');
+  });
+
+  it('decodes a FastTracker module', () => {
+    expect(codec.decode(buildXm({ title: 'sunlight' })).format).toBe('xm');
   });
 
   it('names what it found when it recognises nothing', () => {
