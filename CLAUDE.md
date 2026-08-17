@@ -92,6 +92,7 @@ on both platforms.
   expressive variation, not the instrument's identity. The engine that was
   deleted synthesised oscillator approximations, which is a different and much
   worse thing. See `spikes/rn-sample-playback.md`.
+- **`applyMix(score)` exists because mute and solo had setters and volume and pan did not.** A track's volume was read once at `loadScore` and pan only in `applyScoreToHost`, so once `music_lib`'s edit lock made a mix change stop reloading the score, moving a fader mid-playback moved the fader and not the sound. The web engine pushes CC7 and CC10 from the score and schedules nothing. **The RN sample engine syncs mute and solo only** — it has never carried per-track volume or pan; `muted` and `soloed` are its whole mix state. That gap predates the method, and closing it means a gain node per track, which belongs with the device testing that engine is still waiting on.
 - **The transport is shared; only voicing is per platform.** `shared/playback/`
   holds score flattening, the note cursor, the sounding set, the dispatch window
   and the master trim. `governor.ts` and `channel-allocator.ts`
