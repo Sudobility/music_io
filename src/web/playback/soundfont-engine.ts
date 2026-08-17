@@ -2,8 +2,10 @@
  * `PlaybackEngine` over a worklet-hosted soundfont synth.
  *
  * The shape is: a note queue with a cursor, a clock we own, and a pump that
- * drains a lookahead window and hands the due notes to the synth. Voice
- * allocation and stealing belong to fluidsynth, which is the point — every
+ * keeps a multi-second horizon of timed notes topped up in the worklet's
+ * sequencer. Timing therefore lives on the audio thread, and the pump's only
+ * job — refilling a buffer — is one that tolerates being late. Voice
+ * allocation and stealing belong to fluidsynth, which is the point: every
  * note-loss bug in the engine this replaces came from our own voice management
  * refusing a note.
  *
@@ -24,7 +26,6 @@ import { allocateChannels, CHANNELS_PER_INSTANCE } from './channel-allocator.js'
 import type { ChannelAssignment } from './channel-allocator.js';
 import { PlaybackClock } from './clock.js';
 import { NoteQueue } from '../../shared/playback/note-queue.js';
-import { planDispatch } from '../../shared/playback/pump-window.js';
 import { scheduleClick } from './click.js';
 import { Governor } from './governor.js';
 import { flattenScoreForPlayback, metronomeClicks } from '../../shared/playback/schedule.js';
@@ -75,14 +76,29 @@ export type SoundfontEngineDeps = {
   startPump?: (tick: () => void, intervalMs: number) => () => void;
 };
 
-/** How often the pump runs, and how far ahead it drains. */
+/** How often the pump runs. */
 const PUMP_INTERVAL_MS = 50;
-const LOOKAHEAD_SECONDS = 0.2;
 /**
- * How late a note may be and still play. Beyond this it is skipped, so a
- * main-thread stall cannot turn into a burst — see `pump-window.ts`.
+ * How far ahead the sequencer is kept filled.
+ *
+ * Deep enough that a main-thread stall of any plausible length lands entirely
+ * inside already-queued audio. This used to be a 200ms window plus a 200ms
+ * grace, past which a note was skipped outright — so a stall over ~400ms
+ * silently dropped every note inside it. A 200-track notation redraw measures
+ * 119ms, which made three unlucky frames enough.
+ *
+ * Timing is the worklet's job now. The pump only keeps the buffer full, which
+ * is a job that tolerates being late.
  */
-const GRACE_SECONDS = 0.2;
+const HORIZON_SECONDS = 4;
+/**
+ * The most notes handed to the sequencer in one tick.
+ *
+ * Each is a `postMessage` to the worklet, so without this a dense score's first
+ * tick would post thousands at once. Whatever is left waits 50ms, which is
+ * nothing against a four-second horizon.
+ */
+const MAX_EVENTS_PER_REFILL = 512;
 const POSITION_TICK_INTERVAL_MS = 1000 / 30;
 const CC_VOLUME = 7;
 const CC_PAN = 10;
@@ -597,29 +613,26 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.applyLoop(position);
 
     const speed = this.playbackSpeed;
-    const untilSeconds = position + LOOKAHEAD_SECONDS * speed;
-    const drained = this.queue.drainUntil(this.tickForSeconds(untilSeconds));
-    const { due } = planDispatch({
-      notes: drained,
-      secondsForTick: (tick) => this.secondsForTick(tick),
-      positionSeconds: position,
-      graceSeconds: GRACE_SECONDS * speed,
-    });
+    const untilSeconds = position + HORIZON_SECONDS * speed;
+    const due = this.queue.drainUntil(this.tickForSeconds(untilSeconds), MAX_EVENTS_PER_REFILL);
 
-    for (const { note, atSeconds } of due) {
+    for (const note of due) {
       const state = this.tracks.get(note.trackId);
       if (!state) continue;
       const { instance, channel } = state.assignment;
+      const atSeconds = this.secondsForTick(note.tick);
       const endSeconds = this.secondsForTick(note.tick + note.durTicks);
       this.deps.host.noteAt(
         instance,
         channel,
         note.midi,
         note.velocity,
+        // Clamped to zero in `noteAt`: a note whose moment passed during a
+        // stall sounds at once rather than being dropped, because the sequencer
+        // still holds its release.
         (atSeconds - position) / speed,
         (endSeconds - atSeconds) / speed,
       );
-      this.activeNoteIds.add(note.noteId);
     }
 
     this.pumpMetronome(position, untilSeconds);

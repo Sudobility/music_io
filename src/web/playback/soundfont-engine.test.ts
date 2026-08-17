@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { twoTrackScore } from '@sudobility/music_lib';
 import type { PlaybackLoadState, Score } from '@sudobility/music_types';
 import { SoundfontPlaybackEngine } from './soundfont-engine.js';
+import { flattenScoreForPlayback } from '../../shared/playback/schedule.js';
 
 /** Records everything the engine tells the synth host. */
 function stubHost() {
@@ -628,5 +629,77 @@ describe('SoundfontPlaybackEngine: auditioning', () => {
     host.noteOff.mockClear();
     engine.noteOff(60);
     expect(host.noteOff).toHaveBeenCalled();
+  });
+});
+
+/**
+ * How many notes the fixture actually schedules, so assertions are not magic
+ * numbers. Not `voice.events.length`: that counts rests, which are never
+ * scheduled, and the difference is exactly what made this read 19 of 20.
+ */
+function noteCount(score: Score): number {
+  return flattenScoreForPlayback(score).length;
+}
+
+describe('SoundfontPlaybackEngine: scheduling horizon', () => {
+  it('queues several seconds of music on the first tick, not 200ms', async () => {
+    const { engine, host, pump, score } = setup();
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+    pump.step();
+    const delays = host.noteAt.mock.calls.map((c) => c[4] as number);
+    expect(Math.max(...delays)).toBeGreaterThan(1);
+  });
+
+  it('does not re-send a note it has already scheduled', async () => {
+    const { engine, host, pump, clock, score } = setup();
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+    pump.step();
+    const first = host.noteAt.mock.calls.length;
+    clock.t += 0.05;
+    pump.step();
+    expect(host.noteAt.mock.calls.length).toBe(first);
+  });
+
+  it('plays every note of the piece even when the pump runs far behind', async () => {
+    // Each step is a stall far longer than the old 200ms grace window, which
+    // used to skip every note inside it outright.
+    const { engine, host, pump, clock, score } = setup();
+    let state = 'stopped';
+    engine.setObserver({
+      onPositionTick: () => {},
+      onActiveNotes: () => {},
+      onStateChange: (s) => {
+        state = s;
+      },
+    });
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+
+    pump.step();
+    // Run to the end of the piece in 1.5s lurches. Bounded so a regression that
+    // never ends the piece fails here rather than hanging.
+    for (let i = 0; i < 100 && state === 'playing'; i += 1) {
+      clock.t += 1.5;
+      pump.step();
+    }
+
+    expect(state).toBe('stopped');
+    expect(host.noteAt.mock.calls.length).toBe(noteCount(score));
+  });
+
+  it('caps how many notes one tick hands to the sequencer', async () => {
+    // Each is a postMessage to the worklet; a dense score must not post
+    // thousands in a single frame.
+    const { engine, host, pump, score } = setup();
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+    pump.step();
+    expect(host.noteAt.mock.calls.length).toBeLessThanOrEqual(512);
   });
 });

@@ -58,3 +58,24 @@ describe('NoteQueue', () => {
     expect(q.exhausted).toBe(true);
   });
 });
+
+describe('NoteQueue: capped drain', () => {
+  it('drains no more than maxCount, leaving the rest for the next call', () => {
+    const queue = new NoteQueue();
+    queue.load(
+      Array.from({ length: 10 }, (_, i) => ({
+        tick: i,
+        durTicks: 1,
+        midi: 60,
+        velocity: 80,
+        trackId: 't',
+        noteId: `n${i}`,
+      })),
+    );
+    expect(queue.drainUntil(100, 4).map((n) => n.noteId)).toEqual(['n0', 'n1', 'n2', 'n3']);
+    expect(queue.drainUntil(100, 4).map((n) => n.noteId)).toEqual(['n4', 'n5', 'n6', 'n7']);
+    expect(queue.exhausted).toBe(false);
+    expect(queue.drainUntil(100, 4).map((n) => n.noteId)).toEqual(['n8', 'n9']);
+    expect(queue.exhausted).toBe(true);
+  });
+});

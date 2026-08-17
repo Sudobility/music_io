@@ -13,6 +13,12 @@
  *
  * A note only slightly late is still played, because the ear will not notice
  * and dropping it would be gratuitous.
+ *
+ * **The React Native sample engine is now its only consumer.** The web engine
+ * hands a four-second horizon of self-releasing notes to the fluidsynth
+ * sequencer instead, so nothing there is ever dispatched late enough to need
+ * skipping — see `soundfont-engine.ts`'s `HORIZON_SECONDS`. RN has no sequencer
+ * to hand a horizon to and keeps this model.
  */
 import type { ScheduledNote } from './schedule.js';
 

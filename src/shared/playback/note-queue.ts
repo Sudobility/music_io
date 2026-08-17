@@ -40,12 +40,25 @@ export class NoteQueue {
   }
 
   /**
-   * Every not-yet-returned note starting at or before `tick`, advancing the
-   * cursor past them so a second call does not return them again.
+   * Every not-yet-returned note starting at or before `tick`, up to `maxCount`
+   * of them, advancing the cursor past what it returns.
+   *
+   * The cap bounds one pump tick's cost. On the web engine each note becomes a
+   * `postMessage` to the worklet sequencer, and a four-second horizon over a
+   * two-hundred-track score is thousands of them; whatever the cap leaves
+   * behind is picked up 50ms later, long before it is due.
+   *
+   * Unbounded by default, because the React Native sample engine drains its
+   * whole horizon in one go — it posts nothing across a thread boundary, so it
+   * has nothing to bound.
    */
-  drainUntil(tick: number): ScheduledNote[] {
+  drainUntil(tick: number, maxCount = Number.MAX_SAFE_INTEGER): ScheduledNote[] {
     const out: ScheduledNote[] = [];
-    while (this.cursor < this.notes.length && this.notes[this.cursor].tick <= tick) {
+    while (
+      out.length < maxCount &&
+      this.cursor < this.notes.length &&
+      this.notes[this.cursor].tick <= tick
+    ) {
       out.push(this.notes[this.cursor]);
       this.cursor += 1;
     }
