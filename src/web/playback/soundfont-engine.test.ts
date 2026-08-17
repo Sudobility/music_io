@@ -12,9 +12,18 @@ function stubHost() {
     setChannelPercussion: vi.fn(),
     programSelect: vi.fn(),
     noteOn,
-    noteOnAt: vi.fn((instance: number, channel: number, midi: number, velocity: number, _delaySeconds: number) => {
-      noteOn(instance, channel, midi, velocity);
-    }),
+    noteAt: vi.fn(
+      (
+        instance: number,
+        channel: number,
+        midi: number,
+        velocity: number,
+        _delaySeconds: number,
+        _durationSeconds: number,
+      ) => {
+        noteOn(instance, channel, midi, velocity);
+      },
+    ),
     noteOff: vi.fn(),
     controlChange: vi.fn(),
     allSoundOff: vi.fn(),
@@ -476,7 +485,7 @@ describe('SoundfontPlaybackEngine: transport', () => {
     await engine.loadScore(score);
     await engine.play();
 
-    const delays = host.noteOnAt.mock.calls.map((c) => c[4] as number);
+    const delays = host.noteAt.mock.calls.map((c) => c[4] as number);
     expect(delays.some((delay) => delay > 0.05)).toBe(true);
   });
 

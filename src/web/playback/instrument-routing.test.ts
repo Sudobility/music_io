@@ -20,7 +20,7 @@ function stubHost() {
     setChannelPercussion: vi.fn(),
     programSelect: vi.fn(),
     noteOn,
-    noteOnAt: vi.fn((instance: number, channel: number, midi: number, velocity: number, _delaySeconds: number) => {
+    noteAt: vi.fn((instance: number, channel: number, midi: number, velocity: number, _delaySeconds: number, _durationSeconds: number) => {
       noteOn(instance, channel, midi, velocity);
     }),
     noteOff: vi.fn(),

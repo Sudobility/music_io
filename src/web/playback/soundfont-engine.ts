@@ -46,7 +46,14 @@ export type SynthHostLike = {
   setChannelPercussion(instance: number, channel: number, kit?: number): void;
   programSelect(instance: number, channel: number, program: number): void;
   noteOn(instance: number, channel: number, midi: number, velocity: number): void;
-  noteOnAt(instance: number, channel: number, midi: number, velocity: number, delaySeconds: number): void;
+  noteAt(
+    instance: number,
+    channel: number,
+    midi: number,
+    velocity: number,
+    delaySeconds: number,
+    durationSeconds: number,
+  ): void;
   noteOff(instance: number, channel: number, midi: number): void;
   controlChange(instance: number, channel: number, control: number, value: number): void;
   allSoundOff(): void;
@@ -110,8 +117,6 @@ type TrackState = {
   solo: boolean;
 };
 
-type PendingOff = { atSeconds: number; assignment: ChannelAssignment; midi: number; noteId: string };
-
 export class SoundfontPlaybackEngine implements PlaybackEngine {
   private readonly queue = new NoteQueue();
   private readonly governor: Governor;
@@ -126,8 +131,16 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   private tracks = new Map<string, TrackState>();
   private observer: PlaybackObserver | null = null;
   private stopPump: (() => void) | null = null;
-  private pendingOffs: PendingOff[] = [];
   private activeNoteIds = new Set<string>();
+  /**
+   * When the last note of the loaded score finishes.
+   *
+   * The transport used to know the piece was over by the note queue being
+   * exhausted *and* no note-offs being outstanding. Releases now happen in the
+   * worklet, so there is nothing outstanding to count — this is what stops
+   * playback ending on the last note's attack instead of its release.
+   */
+  private lastNoteEndSeconds = 0;
   private loopRange: ScoreRange | null = null;
   private lastReportedAt = 0;
   private initialized = false;
@@ -293,7 +306,12 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   async loadScore(score: Score): Promise<void> {
     this.score = score;
     this.tempoMap = new TempoMap(score.tempoMap, score.ppq);
-    this.queue.load(flattenScoreForPlayback(score));
+    const notes = flattenScoreForPlayback(score);
+    this.queue.load(notes);
+    this.lastNoteEndSeconds = notes.reduce(
+      (end, n) => Math.max(end, this.secondsForTick(n.tick + n.durTicks)),
+      0,
+    );
     this.clicks = metronomeClicks(score);
     this.clickCursor = 0;
     this.seek(0);
@@ -577,7 +595,6 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     }
     const position = this.clock.positionSeconds;
     this.applyLoop(position);
-    this.releaseDue(position);
 
     const speed = this.playbackSpeed;
     const untilSeconds = position + LOOKAHEAD_SECONDS * speed;
@@ -593,19 +610,21 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
       const state = this.tracks.get(note.trackId);
       if (!state) continue;
       const { instance, channel } = state.assignment;
-      this.deps.host.noteOnAt(instance, channel, note.midi, note.velocity, (atSeconds - position) / speed);
+      const endSeconds = this.secondsForTick(note.tick + note.durTicks);
+      this.deps.host.noteAt(
+        instance,
+        channel,
+        note.midi,
+        note.velocity,
+        (atSeconds - position) / speed,
+        (endSeconds - atSeconds) / speed,
+      );
       this.activeNoteIds.add(note.noteId);
-      this.pendingOffs.push({
-        atSeconds: this.secondsForTick(note.tick + note.durTicks),
-        assignment: state.assignment,
-        midi: note.midi,
-        noteId: note.noteId,
-      });
     }
 
     this.pumpMetronome(position, untilSeconds);
     this.report(position);
-    if (this.queue.exhausted && this.pendingOffs.length === 0 && this.clock.isRunning) this.stop();
+    if (this.queue.exhausted && this.clock.isRunning && position >= this.lastNoteEndSeconds) this.stop();
   }
 
   /**
@@ -656,19 +675,6 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     return this.tempoMultiplier > 0 ? this.tempoMultiplier : 1;
   }
 
-  private releaseDue(position: number): void {
-    const still: PendingOff[] = [];
-    for (const off of this.pendingOffs) {
-      if (off.atSeconds <= position) {
-        this.deps.host.noteOff(off.assignment.instance, off.assignment.channel, off.midi);
-        this.activeNoteIds.delete(off.noteId);
-      } else {
-        still.push(off);
-      }
-    }
-    this.pendingOffs = still;
-  }
-
   private applyLoop(position: number): void {
     if (!this.loopRange) return;
     if (position < this.secondsForTick(this.loopRange.endTick)) return;
@@ -693,7 +699,6 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   }
 
   private clearSounding(): void {
-    this.pendingOffs = [];
     if (this.activeNoteIds.size === 0) return;
     this.activeNoteIds.clear();
     this.observer?.onActiveNotes([]);

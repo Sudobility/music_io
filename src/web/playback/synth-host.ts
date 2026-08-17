@@ -50,7 +50,9 @@ export type SynthSequencer = {
   registerSynthesizer(synth: SynthInstance): Promise<number>;
   setTimeScale(scale: number): void;
   sendEventAt(
-    event: { type: 'noteon'; channel: number; key: number; vel: number },
+    event:
+      | { type: 'noteon'; channel: number; key: number; vel: number }
+      | { type: 'note'; channel: number; key: number; vel: number; duration: number },
     tick: number,
     isAbsolute: boolean,
   ): void;
@@ -268,15 +270,47 @@ export class SynthHost {
     this.synths[instance]?.midiNoteOn(channel, midi, velocity);
   }
 
-  noteOnAt(instance: number, channel: number, midi: number, velocity: number, delaySeconds: number): void {
+  /**
+   * Schedules a note and its release together, ahead of time.
+   *
+   * The sequencer's `note` event carries its own duration, so fluidsynth
+   * releases the note on the audio thread. Note-offs used to be fired from the
+   * main thread as the pump noticed them, which made every note's length track
+   * main-thread lateness — and a stall that held notes long added voices,
+   * loading the audio thread in turn.
+   *
+   * The time scale is milliseconds (`setTimeScale(1000)` in
+   * `createSequencerFor`). A negative delay clamps to now rather than being
+   * refused: a note whose moment passed during a stall should still sound, and
+   * the sequencer still holds its release.
+   */
+  noteAt(
+    instance: number,
+    channel: number,
+    midi: number,
+    velocity: number,
+    delaySeconds: number,
+    durationSeconds: number,
+  ): void {
     const sequencer = this.sequencers[instance];
     if (!sequencer) {
+      // No timed dispatch here; the note sounds immediately and holds until
+      // `allSoundOff`. Better than silence, and the real worklet always has one.
       this.noteOn(instance, channel, midi, velocity);
       return;
     }
     sequencer.sendEventAt(
-      { type: 'noteon', channel, key: midi, vel: velocity },
-      Math.max(0, delaySeconds * 1000),
+      {
+        type: 'note',
+        channel,
+        key: midi,
+        vel: velocity,
+        // Never zero: a note fluidsynth is told lasts no time at all may not
+        // sound, and a rest is expressed by there being no note, not by one of
+        // no length.
+        duration: Math.max(1, Math.round(durationSeconds * 1000)),
+      },
+      Math.max(0, Math.round(delaySeconds * 1000)),
       false,
     );
   }

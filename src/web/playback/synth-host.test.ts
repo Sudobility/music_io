@@ -29,14 +29,14 @@ function stubSynth(sequencer?: SynthSequencer): SynthInstance & { calls: Record<
 }
 
 function stubSequencer() {
-  const sequencer: SynthSequencer = {
+  const sequencer = {
     registerSynthesizer: vi.fn(async (_synth: SynthInstance) => 1),
     setTimeScale: vi.fn((_scale: number) => {}),
     sendEventAt: vi.fn((_event, _tick: number, _isAbsolute: boolean) => {}),
     removeAllEvents: vi.fn(() => {}),
     close: vi.fn(() => {}),
   };
-  return sequencer;
+  return sequencer satisfies SynthSequencer;
 }
 
 /** A minimal AudioContext surface: enough for the master chain and nothing more. */
@@ -59,8 +59,12 @@ function stubContext() {
   } as unknown as AudioContext;
 }
 
-async function hostWith(instanceCount: number) {
-  const synths = Array.from({ length: instanceCount }, () => stubSynth());
+async function hostWith(instanceCount: number, options: { withSequencer?: boolean } = {}) {
+  const withSequencer = options.withSequencer ?? true;
+  const sequencers = Array.from({ length: instanceCount }, () => stubSequencer());
+  const synths = Array.from({ length: instanceCount }, (_, i) =>
+    stubSynth(withSequencer ? sequencers[i] : undefined),
+  );
   let made = 0;
   const host = new SynthHost({ createSynth: () => synths[made++] });
   await host.init(stubContext(), {
@@ -69,8 +73,41 @@ async function hostWith(instanceCount: number) {
     soundfont: new Uint8Array(4).buffer,
     instanceCount,
   });
-  return { host, synths };
+  return { host, synths, sequencers };
 }
+
+describe('SynthHost: timed notes', () => {
+  it('sends one note event carrying its duration, in milliseconds', async () => {
+    const { host, sequencers } = await hostWith(1);
+    host.noteAt(0, 3, 60, 100, 0.25, 1.5);
+    expect(sequencers[0].sendEventAt).toHaveBeenCalledWith(
+      { type: 'note', channel: 3, key: 60, vel: 100, duration: 1500 },
+      250,
+      false,
+    );
+  });
+
+  it('clamps a negative delay to now', async () => {
+    // A note whose moment passed during a main-thread stall sounds at once
+    // rather than being dropped: the sequencer still holds its release.
+    const { host, sequencers } = await hostWith(1);
+    host.noteAt(0, 3, 60, 100, -0.4, 1);
+    expect(sequencers[0].sendEventAt.mock.calls[0][1]).toBe(0);
+  });
+
+  it('never sends a zero-length note', async () => {
+    const { host, sequencers } = await hostWith(1);
+    host.noteAt(0, 3, 60, 100, 0, 0);
+    expect(sequencers[0].sendEventAt.mock.calls[0][0]).toMatchObject({ duration: 1 });
+  });
+
+  it('falls back to an immediate note-on when the instance has no sequencer', async () => {
+    const { host, synths } = await hostWith(1, { withSequencer: false });
+    host.noteAt(0, 3, 60, 100, 0.25, 1.5);
+    // `midiNoteOn` is recorded by the `record()` helper, not a vi.fn.
+    expect(synths[0].calls.midiNoteOn).toEqual([[3, 60, 100]]);
+  });
+});
 
 describe('SynthHost: synth settings', () => {
   it('initialises each synth with 256 MIDI channels and a generous voice ceiling', async () => {
@@ -174,7 +211,7 @@ describe('SynthHost', () => {
     expect(synths[1].calls.midiNoteOn?.[0]).toEqual([4, 60, 100]);
   });
 
-  it('uses the worklet sequencer for delayed note-ons when it exists', async () => {
+  it('uses the worklet sequencer for timed notes when it exists', async () => {
     const sequencer = stubSequencer();
     const synth = stubSynth(sequencer);
     const host = new SynthHost({ createSynth: () => synth });
@@ -185,22 +222,16 @@ describe('SynthHost', () => {
       instanceCount: 1,
     });
 
-    host.noteOnAt(0, 4, 60, 100, 0.125);
+    host.noteAt(0, 4, 60, 100, 0.125, 0.5);
 
     expect(sequencer.registerSynthesizer).toHaveBeenCalledWith(synth);
     expect(sequencer.setTimeScale).toHaveBeenCalledWith(1000);
     expect(sequencer.sendEventAt).toHaveBeenCalledWith(
-      { type: 'noteon', channel: 4, key: 60, vel: 100 },
+      { type: 'note', channel: 4, key: 60, vel: 100, duration: 500 },
       125,
       false,
     );
     expect(synth.calls.midiNoteOn).toBeUndefined();
-  });
-
-  it('falls back to immediate note-ons when no sequencer is available', async () => {
-    const { host, synths } = await hostWith(1);
-    host.noteOnAt(0, 4, 60, 100, 0.125);
-    expect(synths[0].calls.midiNoteOn?.[0]).toEqual([4, 60, 100]);
   });
 
   it('sends a switched drum channel to the drum bank, not just the drum type', async () => {
