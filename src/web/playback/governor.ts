@@ -1,17 +1,27 @@
 /**
- * Adaptive quality: sheds fidelity before playback breaks.
+ * Adaptive quality — currently measuring, not acting.
  *
- * The ladder has one rung, and that is deliberate. Interpolation order is the
- * knob the spike confirmed works — `setInterpolation(0)` renders the same
- * passage in 53% of the time — and it is timbre, which is what should go first.
- * Polyphony was to be the second rung, but the worklet API exposes no setter
- * and needs none: fluidsynth already steals voices at its default, which is the
- * behaviour that rung was asking for. So notes are never dropped to save CPU;
- * at worst an older note is cut short by the synth's own stealing.
+ * This used to step interpolation order down after ten consecutive pump frames
+ * more than 100ms late, on the reasoning that a starved pump meant a starved
+ * synth. `setInterpolation(0)` renders the same passage in 53% of the time, so
+ * the knob is real, and timbre is the right thing to shed first.
  *
- * Falls fast and rises slowly. Falling fast protects the audio; rising fast
- * would just fall again, and quality that flickers is worse than quality that
- * is merely lower.
+ * The scheduling horizon killed the reasoning. The pump no longer delivers
+ * notes on time — it tops up a four-second buffer in the worklet, and the
+ * synth renders from that buffer on the audio thread. The main thread can now
+ * stall for a second with nothing audible happening at all, so lateness here
+ * says only that the main thread is busy. Degrading timbre for every listener
+ * because a notation redraw took 119ms is a cost with no benefit.
+ *
+ * So the count is kept and nothing acts on it. It is free, and it is the shape
+ * a real audio-thread load signal would take. `AudioWorkletNode` exposes no
+ * such signal today, and `AudioContext` offers only latency figures that do not
+ * move under voice pressure; when one exists, it plugs in here.
+ *
+ * Polyphony was to be the other rung. `js-synthesizer` has no runtime setter
+ * for it — `ISynthesizer` has `setInterpolation` and `setGain` and nothing else
+ * — so the ceiling is chosen once at init in `synth-host.ts` and fluidsynth's
+ * own overflow priority does the stealing above it.
  */
 export type GovernorOptions = {
   onChange?: (interpolationOrder: number) => void;
@@ -21,45 +31,33 @@ export type GovernorOptions = {
 const LADDER = [7, 4, 1, 0];
 /** How late a pump frame must be to count against the budget. */
 const LATE_THRESHOLD_SECONDS = 0.1;
-/** Consecutive late frames before stepping down — long enough to ignore one stall. */
-const LATE_FRAMES_TO_DEGRADE = 10;
-/** Clean frames before stepping back up. Deliberately far larger. */
-const CLEAN_FRAMES_TO_RECOVER = 200;
 
 export class Governor {
-  private rung = 0;
   private lateFrames = 0;
-  private cleanFrames = 0;
 
   constructor(private readonly options: GovernorOptions = {}) {}
 
   get interpolation(): number {
-    return LADDER[this.rung];
+    return LADDER[0];
   }
 
-  /** One pump frame's lateness, in seconds. */
+  /** Consecutive frames measured late. Diagnostic; nothing acts on it. */
+  get stalledFrames(): number {
+    return this.lateFrames;
+  }
+
+  /**
+   * One pump frame's lateness, in seconds.
+   *
+   * Counted, never acted on — see this module's doc for why. `options.onChange`
+   * is therefore never invoked; it is kept so the caller's wiring survives
+   * whatever replaces this signal.
+   */
   record(lateBySeconds: number): void {
     if (lateBySeconds > LATE_THRESHOLD_SECONDS) {
-      this.cleanFrames = 0;
       this.lateFrames += 1;
-      if (this.lateFrames >= LATE_FRAMES_TO_DEGRADE) {
-        this.lateFrames = 0;
-        this.step(1);
-      }
       return;
     }
     this.lateFrames = 0;
-    this.cleanFrames += 1;
-    if (this.cleanFrames >= CLEAN_FRAMES_TO_RECOVER) {
-      this.cleanFrames = 0;
-      this.step(-1);
-    }
-  }
-
-  private step(direction: 1 | -1): void {
-    const next = Math.min(LADDER.length - 1, Math.max(0, this.rung + direction));
-    if (next === this.rung) return;
-    this.rung = next;
-    this.options.onChange?.(this.interpolation);
   }
 }
