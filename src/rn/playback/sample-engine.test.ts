@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { changeClefCommand, changeTrackPropsCommand, twoTrackScore } from '@sudobility/music_lib';
-import type { PlaybackLoadState, TransportPlaybackState } from '@sudobility/music_types';
+import type {
+  SoundingNote, PlaybackLoadState, TransportPlaybackState } from '@sudobility/music_types';
 import { RNSamplePlaybackEngine, base64ToBytes } from './sample-engine.js';
 import type { AudioApi } from './audio-api.js';
 
@@ -222,7 +223,7 @@ function makeEngine(overrides: { fetchPack?: (url: string) => Promise<string>; p
 function recordingObserver() {
   const states: TransportPlaybackState[] = [];
   const loads: PlaybackLoadState[] = [];
-  const activeNotes: string[][] = [];
+  const activeNotes: SoundingNote[][] = [];
   const ticks: number[] = [];
   return {
     states,
@@ -231,7 +232,7 @@ function recordingObserver() {
     ticks,
     observer: {
       onPositionTick: (t: number) => ticks.push(t),
-      onActiveNotes: (ids: string[]) => activeNotes.push(ids),
+      onActiveNotes: (notes: SoundingNote[]) => activeNotes.push(notes),
       onStateChange: (s: TransportPlaybackState) => states.push(s),
       onLoadStateChange: (s: PlaybackLoadState) => loads.push(s),
     },

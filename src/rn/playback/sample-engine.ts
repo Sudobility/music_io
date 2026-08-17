@@ -36,6 +36,7 @@ import type {
   PlaybackObserver,
   Score,
   ScoreRange,
+  SoundingNote,
   TransportPlaybackState,
 } from '@sudobility/music_types';
 import { TempoMap, gmInstrument, gmKitAt, isPercussionTrack } from '@sudobility/music_lib';
@@ -85,7 +86,13 @@ export type SampleEngineDeps = {
   startPump?: (tick: () => void, intervalMs: number) => () => void;
 };
 
-type Voice = { source: { stop(when?: number): void; disconnect(): unknown }; gain: RNGainNode; noteId?: string; endsAt: number };
+type Voice = {
+  source: { stop(when?: number): void; disconnect(): unknown };
+  gain: RNGainNode;
+  /** Resolved at scheduling time, so reporting never has to search the score. */
+  sounding?: SoundingNote;
+  endsAt: number;
+};
 
 function defaultFetchPack(url: string): Promise<string> {
   return fetch(url).then((r) => {
@@ -137,7 +144,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
   private readonly soloed = new Set<string>();
   private readonly voices: Voice[] = [];
   private readonly auditioned = new Map<number, Voice>();
-  private activeNoteIds: string[] = [];
+  private activeNotes: SoundingNote[] = [];
   private activeNotesDirty = false;
 
   constructor(deps: SampleEngineDeps = {}) {
@@ -390,7 +397,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     });
 
     const voice = this.buildVoiceFromPlan(buffer, plan, program !== undefined && sustains(program));
-    voice.noteId = note.noteId;
+    voice.sounding = { noteId: note.noteId, trackId: note.trackId, midi: note.midi };
     this.voices.push(voice);
     this.markActiveNotesDirty();
   }
@@ -471,11 +478,13 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     if (changed) this.markActiveNotesDirty();
   }
 
-  private setActiveNotes(ids: string[]): void {
-    const same = ids.length === this.activeNoteIds.length && ids.every((id, i) => id === this.activeNoteIds[i]);
+  private setActiveNotes(notes: SoundingNote[]): void {
+    const same =
+      notes.length === this.activeNotes.length &&
+      notes.every((n, i) => n.noteId === this.activeNotes[i].noteId);
     if (same) return;
-    this.activeNoteIds = ids;
-    this.observer?.onActiveNotes(ids);
+    this.activeNotes = notes;
+    this.observer?.onActiveNotes(notes);
   }
 
   private markActiveNotesDirty(): void {
@@ -485,8 +494,10 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
   private flushActiveNotes(): void {
     if (!this.activeNotesDirty) return;
     this.activeNotesDirty = false;
-    const ids = this.voices.map((v) => v.noteId).filter((id): id is string => id !== undefined);
-    this.setActiveNotes(ids);
+    const notes = this.voices
+      .map((v) => v.sounding)
+      .filter((n): n is SoundingNote => n !== undefined);
+    this.setActiveNotes(notes);
   }
 
   private stopAllVoices(): void {

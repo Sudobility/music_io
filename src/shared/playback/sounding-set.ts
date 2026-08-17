@@ -13,20 +13,29 @@
  * consumer downstream — notation colour, the piano keyboard's key lights — for
  * nothing.
  */
+import type { SoundingNote } from '@sudobility/music_types';
 import type { ScheduledNote } from './schedule.js';
 
 export class SoundingSet {
-  private byStart: Array<{ noteId: string; startSeconds: number }> = [];
+  private byStart: Array<{ note: SoundingNote; startSeconds: number }> = [];
   private byEnd: Array<{ noteId: string; endSeconds: number }> = [];
   private startCursor = 0;
   private endCursor = 0;
-  private sounding = new Set<string>();
+  /**
+   * Keyed by note id so an end can remove the right entry, valued by the
+   * resolved note so a consumer never has to search the score for the track and
+   * pitch the scheduler already knew.
+   */
+  private sounding = new Map<string, SoundingNote>();
   /** Forces the next `advanceTo` to emit, so a reset is always observable. */
   private dirty = true;
 
   load(notes: readonly ScheduledNote[], secondsForTick: (tick: number) => number): void {
     this.byStart = notes
-      .map((n) => ({ noteId: n.noteId, startSeconds: secondsForTick(n.tick) }))
+      .map((n) => ({
+        note: { noteId: n.noteId, trackId: n.trackId, midi: n.midi },
+        startSeconds: secondsForTick(n.tick),
+      }))
       .sort((a, b) => a.startSeconds - b.startSeconds);
     this.byEnd = notes
       .map((n) => ({ noteId: n.noteId, endSeconds: secondsForTick(n.tick + n.durTicks) }))
@@ -49,7 +58,7 @@ export class SoundingSet {
   }
 
   /** The ids sounding at `positionSeconds`, or `null` if they are what they were. */
-  advanceTo(positionSeconds: number): string[] | null {
+  advanceTo(positionSeconds: number): SoundingNote[] | null {
     let changed = this.dirty;
     this.dirty = false;
 
@@ -57,7 +66,8 @@ export class SoundingSet {
       this.startCursor < this.byStart.length &&
       this.byStart[this.startCursor].startSeconds <= positionSeconds
     ) {
-      this.sounding.add(this.byStart[this.startCursor].noteId);
+      const { note } = this.byStart[this.startCursor];
+      this.sounding.set(note.noteId, note);
       this.startCursor += 1;
       changed = true;
     }
@@ -71,7 +81,7 @@ export class SoundingSet {
       this.endCursor += 1;
     }
 
-    return changed ? [...this.sounding] : null;
+    return changed ? [...this.sounding.values()] : null;
   }
 
   /** How many notes are sounding. */
