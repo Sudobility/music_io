@@ -771,3 +771,54 @@ describe('SoundfontPlaybackEngine: sounding notes', () => {
     expect(onActiveNotes).toHaveBeenCalledWith([]);
   });
 });
+
+describe('SoundfontPlaybackEngine: applyMix', () => {
+  it('pushes changed volume and pan without reloading the score', async () => {
+    // Volume and pan had no route to the engine at all: TrackState.volume was
+    // read once at loadScore, and pan only at applyScoreToHost.
+    const { engine, host, score } = setup();
+    await engine.initialize();
+    await engine.loadScore(score);
+
+    host.controlChange.mockClear();
+    const quieter: Score = {
+      ...score,
+      tracks: [{ ...score.tracks[0], volume: 0.25, pan: -1 }, ...score.tracks.slice(1)],
+    };
+    engine.applyMix(quieter);
+
+    const cc7 = host.controlChange.mock.calls.find((c) => c[2] === 7);
+    const cc10 = host.controlChange.mock.calls.find((c) => c[2] === 10);
+    expect(cc7?.[3]).toBe(Math.round(0.25 * 127));
+    expect(cc10?.[3]).toBe(0); // hard left
+  });
+
+  it('honours mute and solo from the score it is handed', async () => {
+    const { engine, host, score } = setup();
+    await engine.initialize();
+    await engine.loadScore(score);
+
+    host.controlChange.mockClear();
+    const soloed: Score = {
+      ...score,
+      tracks: [{ ...score.tracks[0], solo: true }, ...score.tracks.slice(1)],
+    };
+    engine.applyMix(soloed);
+
+    const cc7 = host.controlChange.mock.calls.filter((c) => c[2] === 7);
+    expect(cc7.some((c) => c[3] === 0)).toBe(true); // the non-soloed track
+    expect(cc7.some((c) => (c[3] as number) > 0)).toBe(true); // the soloed one
+  });
+
+  it('does not reschedule anything', async () => {
+    const { engine, host, pump, score } = setup();
+    await engine.initialize();
+    await engine.loadScore(score);
+    await engine.play();
+    pump.step();
+
+    host.noteAt.mockClear();
+    engine.applyMix(score);
+    expect(host.noteAt).not.toHaveBeenCalled();
+  });
+});

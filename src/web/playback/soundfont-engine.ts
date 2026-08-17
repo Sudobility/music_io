@@ -524,6 +524,36 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.applyTrackLevels();
   }
 
+  /**
+   * Re-reads the mix off `score` and pushes it, scheduling nothing.
+   *
+   * `setTrackMute`/`setTrackSolo` covered two of the four mix properties.
+   * Volume was read once, in `loadScore`, and pan only in `applyScoreToHost` —
+   * so with the playback edit lock in place, where a mix change deliberately
+   * does *not* reload, moving a fader mid-playback moved the fader and left the
+   * sound where it was.
+   *
+   * A track the engine does not know is skipped rather than throwing: a mix
+   * change cannot add a track (that would be content), so an unknown id means
+   * the engine is holding an older score and the next `loadScore` settles it.
+   */
+  applyMix(score: Score): void {
+    for (const track of score.tracks) {
+      const state = this.tracks.get(track.id);
+      if (!state) continue;
+      state.volume = track.volume;
+      state.muted = track.muted;
+      state.solo = track.solo;
+      this.deps.host.controlChange(
+        state.assignment.instance,
+        state.assignment.channel,
+        CC_PAN,
+        panToCc(track.pan),
+      );
+    }
+    this.applyTrackLevels();
+  }
+
   setMetronome(enabled: boolean): void {
     this.metronomeEnabled = enabled;
   }

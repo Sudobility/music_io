@@ -63,6 +63,10 @@ export class MockPlaybackEngine implements PlaybackEngine {
     this.record(`setTrackSolo(${trackId},${solo})`);
   }
 
+  applyMix(score: Score): void {
+    this.record(`applyMix(${score.tracks.length})`);
+  }
+
   setMetronome(enabled: boolean): void {
     this.record(`setMetronome(${enabled})`);
   }

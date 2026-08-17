@@ -560,6 +560,25 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     else this.soloed.delete(trackId);
   }
 
+  /**
+   * Re-reads the mix off `score`, scheduling nothing.
+   *
+   * Mute and solo only: this engine has never carried per-track volume or pan
+   * — `muted` and `soloed` are the whole of its mix state — so there is nothing
+   * to push for the other two. That is a gap in this engine rather than
+   * something `applyMix` introduces, and it predates the method. Fixing it
+   * means giving each track its own gain node, which belongs with the device
+   * testing this engine is still waiting on.
+   */
+  applyMix(score: Score): void {
+    this.muted.clear();
+    this.soloed.clear();
+    for (const track of score.tracks) {
+      if (track.muted) this.muted.add(track.id);
+      if (track.solo) this.soloed.add(track.id);
+    }
+  }
+
   setMetronome(enabled: boolean): void {
     this.metronomeOn = enabled;
   }
