@@ -78,12 +78,15 @@ describe('IT pattern unpacking', () => {
     expect(cell(module, 1, 0).note).toBe(119);
   });
 
-  it('maps both note-off and note-cut to off', () => {
+  it('maps note-off, note-cut and OpenMPT note-fade alike', () => {
+    // 253 is a fade, and appears in the MPTM files alone — a reader written
+    // against IT emits MIDI 253 for it, which is not a note at all.
     const module = readIt(
-      buildIt({ patterns: [{ rows: 2, cells: [[{ note: 255 }], [{ note: 254 }]] }] }),
+      buildIt({ patterns: [{ rows: 3, cells: [[{ note: 255 }], [{ note: 254 }], [{ note: 253 }]] }] }),
     );
     expect(cell(module, 0, 0).note).toBe('off');
     expect(cell(module, 1, 0).note).toBe('off');
+    expect(cell(module, 2, 0).note).toBe('off');
   });
 
   // The heart of the format. Without the replay half, this test's second row

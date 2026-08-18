@@ -34,8 +34,15 @@ const MPTM_CMWT = 0x0888;
  * range only fits MIDI at base 0, and `preparator.mptm` uses note 119.
  */
 const NOTE_BASE = 0;
-const NOTE_OFF = 255;
-const NOTE_CUT = 254;
+/**
+ * Only 0-119 are pitches. Everything above ends the note: 255 off, 254 cut and
+ * **253 fade**, an OpenMPT extension that appears in the MPTM files alone — it
+ * is absent from all four ITs, which is exactly how a reader written against IT
+ * comes to emit MIDI 253. Measured across the corpus, no other value above 119
+ * occurs, and the three are indistinguishable in a score model with no
+ * envelopes, so all of them become `'off'`.
+ */
+const LOWEST_TERMINATOR = 253;
 
 /** Order list markers. 255 ends the song; 254 separates and is not a pattern. */
 const ORDER_END = 255;
@@ -156,7 +163,7 @@ function unpackPattern(
 
     if (hasNote) {
       const raw = lastNote[channel];
-      if (raw === NOTE_OFF || raw === NOTE_CUT) cell.note = 'off';
+      if (raw >= LOWEST_TERMINATOR) cell.note = 'off';
       else cell.note = raw + NOTE_BASE;
     }
     if (hasInstrument) cell.instrument = lastInstrument[channel];

@@ -9,6 +9,7 @@
 import type { TrackerCodec, TrackerModule } from '@sudobility/music_types';
 import { readMod } from './read.js';
 import { readDsm } from '../tracker/dsm.js';
+import { readIt } from '../tracker/it.js';
 import { readS3m } from '../tracker/s3m.js';
 import { readXm } from '../tracker/xm.js';
 
@@ -35,6 +36,8 @@ export class SharedTrackerCodec implements TrackerCodec {
   decode(bytes: ArrayBuffer): TrackerModule {
     const view = new Uint8Array(bytes);
     if (fourCC(view, 0) === 'RIFF' && fourCC(view, 8) === 'DSMF') return readDsm(bytes);
+    // IT and MPTM share this magic and this reader; they differ only in `cmwt`.
+    if (fourCC(view, 0) === 'IMPM') return readIt(bytes);
     if (fourCC(view, 44) === 'SCRM') return readS3m(bytes);
     // 17 characters including the trailing space, so not a fourCC.
     if (asciiAt(view, 0, 17) === 'Extended Module: ') return readXm(bytes);

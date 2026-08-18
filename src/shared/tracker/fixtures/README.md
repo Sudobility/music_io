@@ -8,7 +8,9 @@ was not thinking about our parser.
 They caught nothing on the way in — but the DSM offsets in `dsm.ts` were
 *derived* from `race_against_time.dsm` rather than from a specification, and two
 of them contradict the commonly cited layout. Without a real file to measure,
-the decoder would have been wrong in two places.
+the decoder would have been wrong in two places. The IT reader's note-fade
+handling was caught the same way, by `preparator.mptm` failing the MIDI range
+assertion — see below.
 
 Prefer the smallest file that exercises a format when adding to this directory.
 
@@ -22,6 +24,8 @@ Prefer the smallest file that exercises a format when adding to this directory.
 | `portal_to_hell.s3m` | S3M | Portal to hell | — | 54606 |
 | `sunlight.xm` | XM | \|- sunlight -\| | — | 142447 |
 | `dr_wily.xm` | XM | Dr Wily.... | Felix Lindgren | 58823 |
+| `thereal1.it` | IT | The "REAL" One | c512w | 214787 |
+| `preparator.mptm` | MPTM | Preparator | asikwp | 189288 |
 
 **`portal_to_hell.s3m` is kept for a specific reason, not as another sample.**
 Every one of its 31 patterns yields 62-63 rows rather than 64, and most run one
@@ -43,6 +47,31 @@ patterns with no packed data at all, which is what pins the per-pattern row
 count and the blank-pattern handling. Two larger XMs (`mercury.xm` 1.1 MB and
 `1funk.xm` 777 KB) were measured while designing the decoder but cover nothing
 these two do not.
+
+**The IT pair pins the two things that format gets wrong quietly, and they are
+complementary rather than redundant.** `thereal1.it` is the replay-bit
+regression test: 1,246 of its 5,069 notes — a quarter — and nearly all of its
+instrument assignments exist only as mask bits 16 and 32, which consume no
+bytes. A reader that ignores them unpacks every pattern to exactly its declared
+length, consumes exactly its declared bytes, passes every structural check, and
+still loses a quarter of the music onto the wrong tracks. It is also the only
+file here carrying both order-list markers: four 254 separators mid-list and a
+trailing 255.
+
+`preparator.mptm` covers what it does not. It is the MPTM, declaring
+`cmwt == 0x0888` — note that `sadsong.it`, measured but not shipped, carries
+OpenMPT's `OMPT` marker at offset 60 while being an ordinary IT, which is why
+detection keys on `cmwt` instead. It has six distinct pattern lengths including
+63 and 65 either side of 64, where an off-by-one in the row loop would hide. It
+reaches **note 119**, which pins the note base at 0: at `note + 12` — the base
+XM and DSM would suggest — that decodes to MIDI 131 and fails the range check.
+And it holds four **note-fades** (253), an OpenMPT extension absent from all
+four ITs measured; a reader written against IT alone emits MIDI 253 for them.
+That last one was caught by the generic range assertion above, not by design.
+
+Both IT files are drum kits, which corroborates the note base independently:
+their lowest notes are 37 and 36, landing on the General MIDI bass drum rather
+than an octave above it.
 
 Downloadable from `https://api.modarchive.org/downloads.php?moduleid=<id>`.
 

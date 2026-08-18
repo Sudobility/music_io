@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { SharedTrackerCodec } from '../mod/codec.js';
+import { readIt } from './it.js';
 import { readS3m } from './s3m.js';
 import { readXm } from './xm.js';
 
@@ -102,5 +103,84 @@ describe('XM real-world findings', () => {
       .patterns.flat(2)
       .filter((c) => c.note === 'off');
     expect(offs.length).toBeGreaterThan(0);
+  });
+});
+
+describe('IT real-world findings', () => {
+  const load = (name: string) => {
+    const buf = readFileSync(`${DIR}${name}`);
+    return readIt(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
+  };
+  const notesOf = (name: string) =>
+    load(name)
+      .patterns.flat(2)
+      .map((c) => c.note)
+      .filter((n): n is number => typeof n === 'number');
+
+  it('recognises MPTM by cmwt alone', () => {
+    expect(load('thereal1.it').format).toBe('it');
+    expect(load('preparator.mptm').format).toBe('mptm');
+  });
+
+  it('keeps note 119 inside MIDI, which a twelve-semitone base would not', () => {
+    // preparator.mptm reaches note 119. At `note + 12` that is MIDI 131.
+    const notes = notesOf('preparator.mptm');
+    expect(Math.max(...notes)).toBe(119);
+    expect(Math.min(...notes)).toBe(36);
+  });
+
+  it('puts the lowest drum note on the General MIDI kick', () => {
+    // Both files are drum kits — thereal1.it names "bm (kick)", preparator
+    // "Kick-013". MIDI 36 is the GM bass drum; an octave up would be 48.
+    expect(Math.min(...notesOf('thereal1.it'))).toBe(37);
+    expect(Math.min(...notesOf('preparator.mptm'))).toBe(36);
+  });
+
+  it('reads the replayed notes, which a structurally-correct reader would lose', () => {
+    // 3,823 of these come from read bits and 1,246 — a quarter — from replay
+    // bits alone. Dropping the replay half still unpacks every byte cleanly and
+    // still lands on every declared row; it just returns 3,823 notes.
+    expect(notesOf('thereal1.it')).toHaveLength(5069);
+  });
+
+  it('assigns almost every note an instrument, which comes mostly from replay', () => {
+    // 271 instruments are read and 4,798 replayed — 17.7 to 1. Without the
+    // replay half nearly every note lands on instrument 0 and groups onto one
+    // wrong track.
+    const cells = load('thereal1.it')
+      .patterns.flat(2)
+      .filter((c) => typeof c.note === 'number');
+    const placed = cells.filter((c) => c.instrument > 0);
+    expect(placed.length / cells.length).toBeGreaterThan(0.9);
+  });
+
+  it('gives each pattern its own row count', () => {
+    // preparator.mptm has six distinct lengths, including 63 and 65 either side
+    // of 64 — where an off-by-one in the row loop would hide.
+    const rows = new Set(load('preparator.mptm').patterns.map((p) => p.length));
+    expect(rows).toEqual(new Set([8, 56, 63, 64, 65, 72]));
+  });
+
+  it('stops the order list at the end marker and keeps the skip marker', () => {
+    // thereal1.it carries both: four 254 separators, and 255 as its last entry.
+    const order = load('thereal1.it').order;
+    expect(order).not.toContain(255);
+    expect(order.filter((o) => o === 254)).toHaveLength(4);
+  });
+
+  it('treats note-off, note-cut and OpenMPT note-fade alike', () => {
+    const offs = (name: string) =>
+      load(name)
+        .patterns.flat(2)
+        .filter((c) => c.note === 'off');
+    // thereal1.it: 915 offs + 44 cuts. preparator.mptm adds 4 note-fades (253),
+    // which exist in the MPTM files alone — an IT-only reader emits MIDI 253.
+    expect(offs('thereal1.it')).toHaveLength(959);
+    expect(offs('preparator.mptm')).toHaveLength(757);
+  });
+
+  it('reads every instrument name', () => {
+    expect(load('thereal1.it').instruments.filter((i) => i.name.length > 0)).toHaveLength(11);
+    expect(load('preparator.mptm').instruments.filter((i) => i.name.length > 0)).toHaveLength(13);
   });
 });
