@@ -4,8 +4,8 @@
   "author": "Sudobility",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sudobility/music_lib": "^1.7.38",
-    "@sudobility/music_types": "^0.11.18",
+    "@sudobility/music_lib": "^1.7.40",
+    "@sudobility/music_types": "^0.11.19",
     "@tonejs/midi": "^2.0.28",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
@@ -20,8 +20,8 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
-    "@sudobility/music_lib": "^1.7.38",
-    "@sudobility/music_types": "^0.11.18",
+    "@sudobility/music_lib": "^1.7.40",
+    "@sudobility/music_types": "^0.11.19",
     "@tonejs/midi": "^2.0.28",
     "fast-xml-parser": ">=5.0.0",
     "js-synthesizer": "^1.13.0",
