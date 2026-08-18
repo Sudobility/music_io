@@ -31,18 +31,20 @@
  * merging the two transports is the obvious follow-up.
  */
 import type {
+  AuditionVoice,
+  MetronomeClick,
+  PlaybackNote as ScheduledNote,
   PlaybackEngine,
   PlaybackLoadState,
   PlaybackObserver,
-  Score,
+  PlaybackPlan,
+  PlaybackTrack,
   ScoreRange,
   SoundingNote,
+  TempoConversion,
   TransportPlaybackState,
 } from '@sudobility/music_types';
-import { TempoMap, gmInstrument, gmKitAt, isPercussionTrack } from '@sudobility/music_lib';
 import { NoteQueue } from '../../shared/playback/note-queue.js';
-import { flattenScoreForPlayback, metronomeClicks } from '../../shared/playback/schedule.js';
-import type { MetronomeClick, ScheduledNote } from '../../shared/playback/schedule.js';
 import { planDispatch } from '../../shared/playback/pump-window.js';
 import { headroomTrimFor } from '../../shared/playback/mix.js';
 import { gmPackName, percussionPackName } from './gm-pack-name.js';
@@ -116,10 +118,10 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
   private ctx: RNAudioContext | null = null;
   private master: RNGainNode | null = null;
 
-  private score: Score | null = null;
-  private tempoMap: TempoMap | null = null;
+  private plan: PlaybackPlan | null = null;
+  private tempo: TempoConversion | null = null;
   private readonly queue = new NoteQueue();
-  private clicks: MetronomeClick[] = [];
+  private clicks: readonly MetronomeClick[] = [];
   private clickCursor = 0;
 
   private library: PackLibrary | null = null;
@@ -177,14 +179,14 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     });
   }
 
-  async loadScore(score: Score): Promise<void> {
+  async load(plan: PlaybackPlan): Promise<void> {
     this.stopAllVoices();
-    this.score = score;
-    this.tempoMap = new TempoMap(score.tempoMap, score.ppq);
-    this.queue.load(flattenScoreForPlayback(score));
-    this.clicks = metronomeClicks(score);
+    this.plan = plan;
+    this.tempo = plan.tempo;
+    this.queue.load(plan.notes);
+    this.clicks = plan.clicks;
     this.clickCursor = 0;
-    this.headroom = headroomTrimFor(score.tracks.length);
+    this.headroom = headroomTrimFor(plan.tracks.length);
     this.seek(0);
   }
 
@@ -192,21 +194,19 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
 
   /** The pack name for a track, honouring the percussion/kit distinction. */
   private packNameForTrack(trackId: string): string | null {
-    const track = this.score?.tracks.find((t) => t.id === trackId);
+    const track = this.plan?.tracks.find((t) => t.id === trackId);
     if (!track) return null;
-    // A percussion track's `midiProgram` is a kit, not an instrument — the two
-    // never agree, because Brush is 40 and program 40 is Violin. `gmKitAt`
-    // resolves any address to the kit whose region contains it, so a score that
-    // arrives at a program GM defines no kit at still plays.
-    if (isPercussionTrack(track)) return percussionPackName(gmKitAt(track.midiProgram).program);
-    const instrument = gmInstrument(track.midiProgram);
-    return instrument ? gmPackName(track.midiProgram, instrument.name) : null;
+    // The kit-versus-instrument distinction is already resolved into
+    // `voiceProgram`/`voiceName` by music_lib, which owns the GM tables.
+    return track.isPercussion
+      ? percussionPackName(track.voiceProgram)
+      : gmPackName(track.voiceProgram, track.voiceName);
   }
 
   /** Loads every pack the score needs, reporting progress across all of them. */
   private async ensureScorePacks(): Promise<void> {
     const names = new Set<string>();
-    for (const track of this.score?.tracks ?? []) {
+    for (const track of this.plan?.tracks ?? []) {
       const name = this.packNameForTrack(track.id);
       if (name && !this.library!.has(name)) names.add(name);
     }
@@ -304,16 +304,16 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
 
   /** Score tick at the context's current time, from the tempo map and speed. */
   private currentTick(): number {
-    if (!this.ctx || !this.tempoMap) return this.positionTick;
+    if (!this.ctx || !this.tempo) return this.positionTick;
     const elapsed = (this.ctx.currentTime - this.originContextTime) * this.tempoMultiplier;
-    const originSeconds = this.tempoMap.ticksToSeconds(this.originTick);
-    return this.tempoMap.secondsToTicks(originSeconds + elapsed);
+    const originSeconds = this.tempo.ticksToSeconds(this.originTick);
+    return this.tempo.secondsToTicks(originSeconds + elapsed);
   }
 
   private secondsForTick(tick: number): number {
-    if (!this.tempoMap || !this.ctx) return 0;
+    if (!this.tempo || !this.ctx) return 0;
     const fromOrigin =
-      (this.tempoMap.ticksToSeconds(tick) - this.tempoMap.ticksToSeconds(this.originTick)) /
+      (this.tempo.ticksToSeconds(tick) - this.tempo.ticksToSeconds(this.originTick)) /
       this.tempoMultiplier;
     return this.originContextTime + fromOrigin;
   }
@@ -363,9 +363,9 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
   }
 
   private tickAtContextTime(contextTime: number): number {
-    if (!this.tempoMap) return this.positionTick;
+    if (!this.tempo) return this.positionTick;
     const elapsed = (contextTime - this.originContextTime) * this.tempoMultiplier;
-    return this.tempoMap.secondsToTicks(this.tempoMap.ticksToSeconds(this.originTick) + elapsed);
+    return this.tempo.secondsToTicks(this.tempo.ticksToSeconds(this.originTick) + elapsed);
   }
 
   /** Mute/solo, with solo winning: any solo means everything unsoloed is silent. */
@@ -377,8 +377,8 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
   private startNote(note: ScheduledNote, atSeconds: number): void {
     const packName = this.packNameForTrack(note.trackId);
     if (!packName) return;
-    const track = this.score?.tracks.find((t) => t.id === note.trackId);
-    const voicing = this.library?.voice(packName, note.midi, Boolean(track && isPercussionTrack(track)));
+    const track = this.plan?.tracks.find((t) => t.id === note.trackId);
+    const voicing = this.library?.voice(packName, note.midi, Boolean(track?.isPercussion));
     if (!voicing) return;
     const { choice, buffer } = voicing;
 
@@ -393,7 +393,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
       choice,
       // Percussion has no melodic expression: a kit's programs address kits,
       // and a drum is a one-shot whose decay is already in the recording.
-      program: track && isPercussionTrack(track) ? undefined : program,
+      program: track?.isPercussion ? undefined : program,
     });
 
     const voice = this.buildVoiceFromPlan(buffer, plan, program !== undefined && sustains(program));
@@ -581,10 +581,10 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
    * means giving each track its own gain node, which belongs with the device
    * testing this engine is still waiting on.
    */
-  applyMix(score: Score): void {
+  applyMix(tracks: readonly PlaybackTrack[]): void {
     this.muted.clear();
     this.soloed.clear();
-    for (const track of score.tracks) {
+    for (const track of tracks) {
       if (track.muted) this.muted.add(track.id);
       if (track.solo) this.soloed.add(track.id);
     }
@@ -606,25 +606,20 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
    * state change, no active-note report. Fire-and-forget: the caller is a
    * keypress handler and cannot await a pack download.
    */
-  noteOn(midi: number, program: number, isPercussion = false): void {
-    void this.auditionNote(midi, program, isPercussion);
+  noteOn(midi: number, auditionVoice: AuditionVoice): void {
+    void this.auditionNote(midi, auditionVoice);
   }
 
-  private async auditionNote(midi: number, program: number, isPercussion: boolean): Promise<void> {
+  private async auditionNote(midi: number, auditionVoice: AuditionVoice): Promise<void> {
     await this.initialize();
-    let name: string;
-    if (isPercussion) {
-      // `program` is a kit address here, not an instrument. Auditioning it
-      // through the GM instrument table played a violin for a snare.
-      name = percussionPackName(gmKitAt(program).program);
-    } else {
-      const instrument = gmInstrument(program);
-      if (!instrument) return;
-      name = gmPackName(program, instrument.name);
-    }
+    // Already resolved by the caller: a percussion `program` addresses a kit,
+    // and only music_lib's GM tables know which kit an address falls in.
+    const name = auditionVoice.isPercussion
+      ? percussionPackName(auditionVoice.program)
+      : gmPackName(auditionVoice.program, auditionVoice.name);
     await this.library!.ensure(name);
 
-    const voicing = this.library!.voice(name, midi, isPercussion);
+    const voicing = this.library!.voice(name, midi, auditionVoice.isPercussion);
     if (!voicing) return;
     const { choice, buffer } = voicing;
 

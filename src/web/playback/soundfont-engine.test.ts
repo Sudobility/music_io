@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { twoTrackScore } from '@sudobility/music_lib';
-import type { PlaybackLoadState, Score } from '@sudobility/music_types';
+import type { PlaybackLoadState, PlaybackPlan } from '@sudobility/music_types';
 import { SoundfontPlaybackEngine } from './soundfont-engine.js';
-import { flattenScoreForPlayback } from '../../shared/playback/schedule.js';
+import { testPlan, twoTrackPlan } from '../../shared/playback/test-plan.js';
 
 /** Records everything the engine tells the synth host. */
 function stubHost() {
@@ -72,7 +71,7 @@ function manualPump() {
   };
 }
 
-function setup(score?: Score, createContext: () => AudioContext = () => stubContext()) {
+function setup(plan?: PlaybackPlan, createContext: () => AudioContext = () => stubContext()) {
   const host = stubHost();
   const pump = manualPump();
   const clock = { t: 0 };
@@ -85,48 +84,51 @@ function setup(score?: Score, createContext: () => AudioContext = () => stubCont
     now: () => clock.t,
     startPump: pump.start,
   });
-  return { engine, host, pump, clock, score: score ?? twoTrackScore() };
+  return { engine, host, pump, clock, plan: plan ?? twoTrackPlan() };
 }
 
 describe('SoundfontPlaybackEngine: loading a score', () => {
   it('sends each track its volume as CC7 and its pan as CC10', async () => {
-    const { engine, host, score } = setup();
+    const { engine, host, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     const controls = host.controlChange.mock.calls.map((c) => c[2]);
     expect(controls).toContain(7);
     expect(controls).toContain(10);
   });
 
   it('selects each track GM program', async () => {
-    const { engine, host, score } = setup();
+    const { engine, host, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     const programs = host.programSelect.mock.calls.map((c) => c[2]);
-    expect(programs).toEqual(score.tracks.map((t) => t.midiProgram));
+    expect(programs).toEqual(plan.tracks.map((t: { midiProgram: number }) => t.midiProgram));
   });
 
   it('marks a percussion-clef track as percussion and never selects a program on it', async () => {
     // Selecting a program on a percussion channel silences it — see the spike.
-    const base = twoTrackScore();
-    const score: Score = { ...base, tracks: [{ ...base.tracks[0], clef: 'percussion' }, base.tracks[1]] };
-    const { engine, host } = setup(score);
+    const base = twoTrackPlan();
+    const plan = testPlan({
+      ...base,
+      tracks: [{ ...base.tracks[0], isPercussion: true }, base.tracks[1]],
+    });
+    const { engine, host } = setup(plan);
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
 
     expect(host.setChannelPercussion).toHaveBeenCalledTimes(1);
     expect(host.programSelect).toHaveBeenCalledTimes(1); // only the pitched track
   });
 
   it('tells the host how many channels are summing, which sizes the headroom', async () => {
-    const { engine, host, score } = setup();
+    const { engine, host, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
-    expect(host.setTrackCount).toHaveBeenCalledWith(score.tracks.length);
+    await engine.load(plan);
+    expect(host.setTrackCount).toHaveBeenCalledWith(plan.tracks.length);
   });
 
   it('resets transport position when replacing the loaded score', async () => {
-    const { engine, score } = setup();
+    const { engine, plan } = setup();
     const ticks: number[] = [];
     engine.setObserver({
       onPositionTick: (tick) => ticks.push(tick),
@@ -134,11 +136,11 @@ describe('SoundfontPlaybackEngine: loading a score', () => {
       onStateChange: () => {},
     });
     await engine.initialize();
-    await engine.loadScore(score);
-    engine.seek(score.ppq * 4);
+    await engine.load(plan);
+    engine.seek(480 * 4);
 
     ticks.length = 0;
-    await engine.loadScore({ ...score, metadata: { ...score.metadata, title: 'Next project' } });
+    await engine.load(testPlan({ ...plan, tracks: plan.tracks }));
 
     expect(ticks.at(-1)).toBe(0);
   });
@@ -146,10 +148,10 @@ describe('SoundfontPlaybackEngine: loading a score', () => {
 
 describe('SoundfontPlaybackEngine: mixing', () => {
   it('mutes by sending CC7 zero and restores the track volume on unmute', async () => {
-    const { engine, host, score } = setup();
+    const { engine, host, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
-    const track = score.tracks[0];
+    await engine.load(plan);
+    const track = plan.tracks[0];
 
     host.controlChange.mockClear();
     engine.setTrackMute(track.id, true);
@@ -162,12 +164,12 @@ describe('SoundfontPlaybackEngine: mixing', () => {
   });
 
   it('solo silences every non-soloed track', async () => {
-    const { engine, host, score } = setup();
+    const { engine, host, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
 
     host.controlChange.mockClear();
-    engine.setTrackSolo(score.tracks[0].id, true);
+    engine.setTrackSolo(plan.tracks[0].id, true);
 
     const cc7 = host.controlChange.mock.calls.filter((c) => c[2] === 7);
     expect(cc7.some((c) => c[3] === 0)).toBe(true); // the non-soloed one
@@ -192,17 +194,17 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
     // good, leaving the transport stuck at "stopped" with a clean console.
     const context = stubContext() as unknown as Record<string, unknown>;
     context.state = 'suspended';
-    const { engine, host, score } = setup(undefined, () => context as never);
+    const { engine, host, plan } = setup(undefined, () => context as never);
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     expect(host.init).not.toHaveBeenCalled();
   });
 
   it('resumes the context and brings the synth up when play is pressed', async () => {
     // Play is a user gesture, which is what makes resuming allowed.
     const context = suspendableContext();
-    const { engine, host, score } = setup(undefined, () => context as never);
-    await engine.loadScore(score);
+    const { engine, host, plan } = setup(undefined, () => context as never);
+    await engine.load(plan);
     expect(host.init).not.toHaveBeenCalled();
 
     await engine.play();
@@ -211,16 +213,16 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
   });
 
   it('tells the host about a score that arrived before the synth existed', async () => {
-    // loadScore no longer waits for the synth, so the programs and levels it
+    // load no longer waits for the synth, so the programs and levels it
     // would have sent have to be sent once there is something to send them to.
     const context = suspendableContext();
-    const { engine, host, score } = setup(undefined, () => context as never);
-    await engine.loadScore(score);
+    const { engine, host, plan } = setup(undefined, () => context as never);
+    await engine.load(plan);
     expect(host.programSelect).not.toHaveBeenCalled();
 
     await engine.play();
     expect(host.programSelect).toHaveBeenCalled();
-    expect(host.setTrackCount).toHaveBeenCalledWith(score.tracks.length);
+    expect(host.setTrackCount).toHaveBeenCalledWith(plan.tracks.length);
   });
 
   /** An engine whose soundfont does not arrive until the returned `release` is called. */
@@ -263,7 +265,7 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
       onStateChange: (s) => states.push(s),
       onLoadStateChange: (s) => loads.push(s.status),
     });
-    await engine.loadScore(twoTrackScore());
+    await engine.load(twoTrackPlan());
 
     const playing = engine.play();
     expect(states).toEqual([]); // nothing is playing yet, and nothing claims to be
@@ -281,8 +283,8 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
   it('reports playing on the spot once the synth is up', async () => {
     // Only the first press waits. Every one after it must be immediate — a
     // transport that lags a frame behind the button is its own bug.
-    const { engine, host, pump, score } = setup();
-    await engine.loadScore(score);
+    const { engine, host, pump, plan } = setup();
+    await engine.load(plan);
     await engine.initialize();
     expect(host.init).toHaveBeenCalled();
 
@@ -301,7 +303,7 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
 
   it('does not start playing if the user pauses while the synth loads', async () => {
     const { engine, pump, release } = withPendingFont();
-    await engine.loadScore(twoTrackScore());
+    await engine.load(twoTrackPlan());
 
     const playing = engine.play();
     engine.pause();
@@ -375,9 +377,9 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
     // interval keeps firing and every later tick throws at the same place, so
     // playback stops dead with a clean console and a transport still reporting
     // "playing" — the exact silent-failure shape this engine exists to remove.
-    const { engine, host, pump, clock, score } = setup();
+    const { engine, host, pump, clock, plan } = setup();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
 
     host.noteOn.mockImplementationOnce(() => {
@@ -396,8 +398,8 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
   });
 
   it('brings the synth up only once for concurrent callers', async () => {
-    const { engine, host, score } = setup();
-    await Promise.all([engine.initialize(), engine.initialize(), engine.loadScore(score)]);
+    const { engine, host, plan } = setup();
+    await Promise.all([engine.initialize(), engine.initialize(), engine.load(plan)]);
     expect(host.init).toHaveBeenCalledTimes(1);
   });
 
@@ -419,7 +421,7 @@ describe('SoundfontPlaybackEngine: bringing the synth up', () => {
 
 describe('SoundfontPlaybackEngine: transport', () => {
   it('reports playing, then paused, then stopped', async () => {
-    const { engine, score } = setup();
+    const { engine, plan } = setup();
     const states: string[] = [];
     engine.setObserver({
       onPositionTick: () => {},
@@ -427,7 +429,7 @@ describe('SoundfontPlaybackEngine: transport', () => {
       onStateChange: (s) => states.push(s),
     });
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     engine.pause();
     engine.stop();
@@ -435,9 +437,9 @@ describe('SoundfontPlaybackEngine: transport', () => {
   });
 
   it('runs the pump only while playing', async () => {
-    const { engine, pump, score } = setup();
+    const { engine, pump, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     expect(pump.running).toBe(false);
     await engine.play();
     expect(pump.running).toBe(true);
@@ -446,7 +448,7 @@ describe('SoundfontPlaybackEngine: transport', () => {
   });
 
   it('reports the current tick before pausing so the caret does not jump to the last sample', async () => {
-    const { engine, clock, score } = setup();
+    const { engine, clock, plan } = setup();
     const ticks: number[] = [];
     engine.setObserver({
       onPositionTick: (tick) => ticks.push(tick),
@@ -454,7 +456,7 @@ describe('SoundfontPlaybackEngine: transport', () => {
       onStateChange: () => {},
     });
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     ticks.length = 0;
 
@@ -465,9 +467,9 @@ describe('SoundfontPlaybackEngine: transport', () => {
   });
 
   it('dispatches notes that have come due, and does not repeat them', async () => {
-    const { engine, host, pump, clock, score } = setup();
+    const { engine, host, pump, clock, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
 
     clock.t = 1; // a second of score time has passed
@@ -480,10 +482,15 @@ describe('SoundfontPlaybackEngine: transport', () => {
   });
 
   it('hands future lookahead notes to the host with a playback-relative delay', async () => {
-    const score: Score = { ...twoTrackScore(), tempoMap: [{ id: 'fast', tick: 0, bpm: 600 }] };
-    const { engine, host } = setup(score);
+    // 600 BPM at ppq 480 is 4800 ticks per second — a fast linear tempo, so a
+    // lookahead note lands a small, easily-asserted delay ahead.
+    const fast = testPlan({
+      ...twoTrackPlan(),
+      tempo: { ticksToSeconds: (t) => t / 4800, secondsToTicks: (sec) => sec * 4800 },
+    });
+    const { engine, host, plan } = setup(fast);
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
 
     const delays = host.noteAt.mock.calls.map((c) => c[4] as number);
@@ -496,9 +503,9 @@ describe('SoundfontPlaybackEngine: transport', () => {
     // setup. By then the clock said the music was already seconds in, so every
     // note before that point was past its grace window and skipped — the
     // opening of the piece vanished. Measured at 2.3s lost on a real load.
-    const { engine, host, pump, clock, score } = setup();
+    const { engine, host, pump, clock, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
 
     clock.t = 2.3; // the thread was busy; the pump only runs now
@@ -509,9 +516,9 @@ describe('SoundfontPlaybackEngine: transport', () => {
   });
 
   it('does not resurrect playback from a stray pump tick after stop', async () => {
-    const { engine, host, pump, clock, score } = setup();
+    const { engine, host, pump, clock, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     expect(host.noteOn).toHaveBeenCalled();
 
@@ -524,9 +531,9 @@ describe('SoundfontPlaybackEngine: transport', () => {
   });
 
   it('clicks only when the metronome is on', async () => {
-    const { engine, pump, clock, score } = setup();
+    const { engine, pump, clock, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
 
     clock.t = 1;
@@ -541,9 +548,9 @@ describe('SoundfontPlaybackEngine: transport', () => {
   });
 
   it('silences everything on stop rather than leaving notes ringing', async () => {
-    const { engine, host, score } = setup();
+    const { engine, host, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     host.allSoundOff.mockClear();
     engine.stop();
@@ -555,7 +562,7 @@ describe('SoundfontPlaybackEngine: transport', () => {
     // it: `PlaybackController.seek` only forwards to the engine. Without this
     // report a click on the sheet moved the transport but left the caret at
     // tick 0, which is exactly how it looked.
-    const { engine, score } = setup();
+    const { engine, plan } = setup();
     const ticks: number[] = [];
     engine.setObserver({
       onPositionTick: (t) => ticks.push(t),
@@ -563,10 +570,10 @@ describe('SoundfontPlaybackEngine: transport', () => {
       onStateChange: () => {},
     });
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
 
-    engine.seek(score.ppq * 4);
-    expect(ticks.at(-1)).toBe(score.ppq * 4);
+    engine.seek(480 * 4);
+    expect(ticks.at(-1)).toBe(480 * 4);
   });
 
   it('keeps reporting after a backward seek during playback', async () => {
@@ -574,7 +581,7 @@ describe('SoundfontPlaybackEngine: transport', () => {
     // one, so seeking backwards left the difference negative and suppressed
     // every report until playback caught back up — a caret that froze for as
     // long as the jump was.
-    const { engine, pump, clock, score } = setup();
+    const { engine, pump, clock, plan } = setup();
     const ticks: number[] = [];
     engine.setObserver({
       onPositionTick: (t) => ticks.push(t),
@@ -582,7 +589,7 @@ describe('SoundfontPlaybackEngine: transport', () => {
       onStateChange: () => {},
     });
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
 
     clock.t = 1; // inside the piece, while playback is still running
@@ -596,12 +603,12 @@ describe('SoundfontPlaybackEngine: transport', () => {
   });
 
   it('seeking moves the queue cursor, so earlier notes do not fire afterwards', async () => {
-    const { engine, host, pump, clock, score } = setup();
+    const { engine, host, pump, clock, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
 
-    engine.seek(score.ppq * 100); // far past every note
+    engine.seek(480 * 100); // far past every note
     host.noteOn.mockClear();
     clock.t = 0.1;
     pump.step();
@@ -611,21 +618,21 @@ describe('SoundfontPlaybackEngine: transport', () => {
 
 describe('SoundfontPlaybackEngine: auditioning', () => {
   it('sounds a tapped key without touching transport state', async () => {
-    const { engine, host, pump, score } = setup();
+    const { engine, host, pump, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
 
-    engine.noteOn(60, 0);
+    engine.noteOn(60, { program: 0, name: 'x', isPercussion: false });
 
     expect(host.noteOn).toHaveBeenCalled();
     expect(pump.running).toBe(false); // the transport stayed put
   });
 
   it('releases a held audition note', async () => {
-    const { engine, host, score } = setup();
+    const { engine, host, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
-    engine.noteOn(60, 0);
+    await engine.load(plan);
+    engine.noteOn(60, { program: 0, name: 'x', isPercussion: false });
     host.noteOff.mockClear();
     engine.noteOff(60);
     expect(host.noteOff).toHaveBeenCalled();
@@ -633,19 +640,20 @@ describe('SoundfontPlaybackEngine: auditioning', () => {
 });
 
 /**
- * How many notes the fixture actually schedules, so assertions are not magic
- * numbers. Not `voice.events.length`: that counts rests, which are never
- * scheduled, and the difference is exactly what made this read 19 of 20.
+ * How many notes the plan schedules. Trivial now that the engine is handed
+ * notes rather than a score — it used to have to flatten the fixture itself,
+ * and counting `voice.events.length` instead (which includes rests) is what
+ * once made this read 19 of 20.
  */
-function noteCount(score: Score): number {
-  return flattenScoreForPlayback(score).length;
+function noteCount(plan: PlaybackPlan): number {
+  return plan.notes.length;
 }
 
 describe('SoundfontPlaybackEngine: scheduling horizon', () => {
   it('queues several seconds of music on the first tick, not 200ms', async () => {
-    const { engine, host, pump, score } = setup();
+    const { engine, host, pump, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     pump.step();
     const delays = host.noteAt.mock.calls.map((c) => c[4] as number);
@@ -653,9 +661,9 @@ describe('SoundfontPlaybackEngine: scheduling horizon', () => {
   });
 
   it('does not re-send a note it has already scheduled', async () => {
-    const { engine, host, pump, clock, score } = setup();
+    const { engine, host, pump, clock, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     pump.step();
     const first = host.noteAt.mock.calls.length;
@@ -667,7 +675,7 @@ describe('SoundfontPlaybackEngine: scheduling horizon', () => {
   it('plays every note of the piece even when the pump runs far behind', async () => {
     // Each step is a stall far longer than the old 200ms grace window, which
     // used to skip every note inside it outright.
-    const { engine, host, pump, clock, score } = setup();
+    const { engine, host, pump, clock, plan } = setup();
     let state = 'stopped';
     engine.setObserver({
       onPositionTick: () => {},
@@ -677,7 +685,7 @@ describe('SoundfontPlaybackEngine: scheduling horizon', () => {
       },
     });
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
 
     pump.step();
@@ -689,15 +697,15 @@ describe('SoundfontPlaybackEngine: scheduling horizon', () => {
     }
 
     expect(state).toBe('stopped');
-    expect(host.noteAt.mock.calls.length).toBe(noteCount(score));
+    expect(host.noteAt.mock.calls.length).toBe(noteCount(plan));
   });
 
   it('caps how many notes one tick hands to the sequencer', async () => {
     // Each is a postMessage to the worklet; a dense score must not post
     // thousands in a single frame.
-    const { engine, host, pump, score } = setup();
+    const { engine, host, pump, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     pump.step();
     expect(host.noteAt.mock.calls.length).toBeLessThanOrEqual(512);
@@ -714,11 +722,11 @@ describe('SoundfontPlaybackEngine: sounding notes', () => {
   }
 
   it('reports sounding notes only when they change', async () => {
-    const { engine, pump, clock, score } = setup();
+    const { engine, pump, clock, plan } = setup();
     const { onActiveNotes, observer } = observed();
     engine.setObserver(observer);
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     pump.step();
 
@@ -737,11 +745,11 @@ describe('SoundfontPlaybackEngine: sounding notes', () => {
   it('stops reporting a note once it has ended', async () => {
     // Nothing asserted this before: the set was fed by note-offs the pump fired
     // itself, and when those moved to the worklet it silently only ever grew.
-    const { engine, pump, clock, score } = setup();
+    const { engine, pump, clock, plan } = setup();
     const { onActiveNotes, observer } = observed();
     engine.setObserver(observer);
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
 
     let sawSounding = false;
@@ -758,34 +766,33 @@ describe('SoundfontPlaybackEngine: sounding notes', () => {
   });
 
   it('clears the sounding set on a seek, matching the synth being silenced', async () => {
-    const { engine, pump, score } = setup();
+    const { engine, pump, plan } = setup();
     const { onActiveNotes, observer } = observed();
     engine.setObserver(observer);
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     pump.step();
 
     onActiveNotes.mockClear();
-    engine.seek(score.ppq * 2);
+    engine.seek(480 * 2);
     expect(onActiveNotes).toHaveBeenCalledWith([]);
   });
 });
 
 describe('SoundfontPlaybackEngine: applyMix', () => {
-  it('pushes changed volume and pan without reloading the score', async () => {
+  it('pushes changed volume and pan without reloading', async () => {
     // Volume and pan had no route to the engine at all: TrackState.volume was
     // read once at loadScore, and pan only at applyScoreToHost.
-    const { engine, host, score } = setup();
+    const { engine, host, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
 
     host.controlChange.mockClear();
-    const quieter: Score = {
-      ...score,
-      tracks: [{ ...score.tracks[0], volume: 0.25, pan: -1 }, ...score.tracks.slice(1)],
-    };
-    engine.applyMix(quieter);
+    engine.applyMix([
+      { ...plan.tracks[0], volume: 0.25, pan: -1 },
+      ...plan.tracks.slice(1),
+    ]);
 
     const cc7 = host.controlChange.mock.calls.find((c) => c[2] === 7);
     const cc10 = host.controlChange.mock.calls.find((c) => c[2] === 10);
@@ -793,17 +800,13 @@ describe('SoundfontPlaybackEngine: applyMix', () => {
     expect(cc10?.[3]).toBe(0); // hard left
   });
 
-  it('honours mute and solo from the score it is handed', async () => {
-    const { engine, host, score } = setup();
+  it('honours mute and solo from the tracks it is handed', async () => {
+    const { engine, host, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
 
     host.controlChange.mockClear();
-    const soloed: Score = {
-      ...score,
-      tracks: [{ ...score.tracks[0], solo: true }, ...score.tracks.slice(1)],
-    };
-    engine.applyMix(soloed);
+    engine.applyMix([{ ...plan.tracks[0], solo: true }, ...plan.tracks.slice(1)]);
 
     const cc7 = host.controlChange.mock.calls.filter((c) => c[2] === 7);
     expect(cc7.some((c) => c[3] === 0)).toBe(true); // the non-soloed track
@@ -811,14 +814,14 @@ describe('SoundfontPlaybackEngine: applyMix', () => {
   });
 
   it('does not reschedule anything', async () => {
-    const { engine, host, pump, score } = setup();
+    const { engine, host, pump, plan } = setup();
     await engine.initialize();
-    await engine.loadScore(score);
+    await engine.load(plan);
     await engine.play();
     pump.step();
 
     host.noteAt.mockClear();
-    engine.applyMix(score);
+    engine.applyMix(plan.tracks);
     expect(host.noteAt).not.toHaveBeenCalled();
   });
 });

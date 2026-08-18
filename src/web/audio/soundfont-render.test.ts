@@ -56,6 +56,8 @@ const track = (over: Partial<RenderPlan['tracks'][number]> = {}) => ({
   isPercussion: false,
   volume: 1,
   pan: 0,
+  voiceProgram: 40,
+  voiceName: 'Violin',
   ...over,
 });
 

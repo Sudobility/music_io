@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { changeClefCommand, changeTrackPropsCommand, twoTrackScore } from '@sudobility/music_lib';
+import { testNote, testPlan, testTrack } from '../../shared/playback/test-plan.js';
 import type {
   SoundingNote, PlaybackLoadState, TransportPlaybackState } from '@sudobility/music_types';
 import { RNSamplePlaybackEngine, base64ToBytes } from './sample-engine.js';
@@ -178,8 +178,8 @@ function packBody(instrument: string): string {
 /**
  * A drum kit pack: GM's 35..81, minus slot 43.
  *
- * The gap is at 43 on purpose. `scoreWithDrums`'s drum part plays 36 and 43
- * (C2 and G2 from `twoTrackScore`'s bass line), so one of its two notes lands
+ * The gap is at 43 on purpose. `planWithDrums`'s drum part plays 36 and 43
+ * (the bass line's pitches), so one of its two notes lands
  * on a slot this kit does not define — which is what makes the
  * never-bend-a-drum assertion able to fail. A gap at a note nothing plays
  * tests nothing; the first version of this fixture omitted 56 and the
@@ -239,13 +239,52 @@ function recordingObserver() {
   };
 }
 
-/** twoTrackScore with its second track turned into a TR-808 drum part. */
-function scoreWithDrums() {
-  let score = twoTrackScore();
-  const drumTrack = score.tracks[1]!.id;
-  score = changeClefCommand(drumTrack, 'percussion').execute(score);
-  score = changeTrackPropsCommand(drumTrack, { midiProgram: 25 }).execute(score);
-  return { score, drumTrack };
+/**
+ * Two pitched tracks: a melody and a bass line.
+ *
+ * The bass plays 36 and 43 because the drum variant below reuses those pitches
+ * as kit slots, and `kitBody`'s gap at 43 is what makes the
+ * never-bend-a-drum assertion able to fail.
+ */
+/** 30 BPM at ppq 480 is 240 ticks per second — slow enough to outlast a sample. */
+const SLOW_TEMPO = {
+  ticksToSeconds: (tick: number) => tick / 240,
+  secondsToTicks: (seconds: number) => seconds * 240,
+};
+
+function twoTrackPlan() {
+  const tracks = [
+    testTrack({ id: 'lead', midiProgram: 0, voiceProgram: 0, voiceName: 'Acoustic Grand Piano' }),
+    testTrack({ id: 'bass', midiProgram: 32, voiceProgram: 32, voiceName: 'Acoustic Bass' }),
+  ];
+  const notes = [
+    testNote({ trackId: 'lead', tick: 0, midi: 60, noteId: 'l0' }),
+    testNote({ trackId: 'lead', tick: 480, midi: 62, noteId: 'l1' }),
+    testNote({ trackId: 'lead', tick: 960, midi: 64, noteId: 'l2' }),
+    testNote({ trackId: 'lead', tick: 1440, midi: 65, noteId: 'l3' }),
+    testNote({ trackId: 'bass', tick: 0, midi: 36, noteId: 'b0' }),
+    testNote({ trackId: 'bass', tick: 960, midi: 43, noteId: 'b1' }),
+  ];
+  return testPlan({
+    tracks,
+    notes,
+    clicks: [0, 480, 960, 1440].map((tick, i) => ({ tick, accent: i === 0 })),
+  });
+}
+
+/** The same, with the bass line turned into a TR-808 drum part. */
+function planWithDrums() {
+  const base = twoTrackPlan();
+  const drumTrack = 'bass';
+  const plan = testPlan({
+    ...base,
+    tracks: base.tracks.map((t) =>
+      t.id === drumTrack
+        ? { ...t, isPercussion: true, midiProgram: 25, voiceProgram: 25, voiceName: 'TR-808 Kit' }
+        : t,
+    ),
+  });
+  return { plan, drumTrack };
 }
 
 describe('RNSamplePlaybackEngine', () => {
@@ -266,7 +305,7 @@ describe('RNSamplePlaybackEngine', () => {
       onStateChange: (s) => events.push(`state:${s}`),
       onLoadStateChange: (s) => events.push(`load:${s.status}`),
     });
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
 
     await ctx.engine.play();
 
@@ -279,7 +318,7 @@ describe('RNSamplePlaybackEngine', () => {
   });
 
   it('schedules the score\'s notes as soon as playback starts', async () => {
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
     await ctx.engine.play();
 
     expect(ctx.graph.sources.length).toBeGreaterThan(0);
@@ -296,7 +335,7 @@ describe('RNSamplePlaybackEngine', () => {
         return packBody(/\/([a-z0-9_]+)-mp3\.js$/.exec(url)![1]!);
       },
     });
-    await local.engine.loadScore(twoTrackScore());
+    await local.engine.load(twoTrackPlan());
     await local.engine.play();
     const afterFirst = fetched.length;
     local.engine.stop();
@@ -315,7 +354,7 @@ describe('RNSamplePlaybackEngine', () => {
     // engine walks a 0..1 progress bar over work it is not doing, and the
     // transport shows "Preparing instruments" on every press of Play.
     const local = makeEngine();
-    await local.engine.loadScore(twoTrackScore());
+    await local.engine.load(twoTrackPlan());
     await local.engine.play();
     local.engine.stop();
 
@@ -341,9 +380,9 @@ describe('RNSamplePlaybackEngine', () => {
         return packBody(/\/([a-z0-9_]+)-mp3\.js$/.exec(url)![1]!);
       },
     });
-    await local.engine.loadScore(twoTrackScore());
+    await local.engine.load(twoTrackPlan());
 
-    local.engine.noteOn(60, 0);
+    local.engine.noteOn(60, { program: 0, name: 'Acoustic Grand Piano', isPercussion: false });
     await local.engine.play();
     await vi.waitFor(() => expect(local.graph.sources.length).toBeGreaterThan(0));
 
@@ -353,9 +392,9 @@ describe('RNSamplePlaybackEngine', () => {
   });
 
   it('plays nothing for a muted track', async () => {
-    const score = twoTrackScore();
-    await ctx.engine.loadScore(score);
-    for (const track of score.tracks) ctx.engine.setTrackMute(track.id, true);
+    const plan = twoTrackPlan();
+    await ctx.engine.load(plan);
+    for (const track of plan.tracks) ctx.engine.setTrackMute(track.id, true);
     await ctx.engine.play();
     ctx.step();
 
@@ -363,16 +402,16 @@ describe('RNSamplePlaybackEngine', () => {
   });
 
   it('silences every unsoloed track when anything is soloed', async () => {
-    const score = twoTrackScore();
+    const plan = twoTrackPlan();
     const solo = makeEngine();
-    await solo.engine.loadScore(score);
-    solo.engine.setTrackSolo(score.tracks[0]!.id, true);
+    await solo.engine.load(plan);
+    solo.engine.setTrackSolo(plan.tracks[0]!.id, true);
     await solo.engine.play();
     solo.step();
     const soloedCount = solo.graph.sources.length;
 
     const all = makeEngine();
-    await all.engine.loadScore(score);
+    await all.engine.load(plan);
     await all.engine.play();
     all.step();
 
@@ -383,7 +422,7 @@ describe('RNSamplePlaybackEngine', () => {
   it('reports the sounding note ids so the editor can highlight them', async () => {
     const { observer, activeNotes } = recordingObserver();
     ctx.engine.setObserver(observer);
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
     await ctx.engine.play();
     ctx.step();
 
@@ -393,7 +432,7 @@ describe('RNSamplePlaybackEngine', () => {
   it('coalesces active-note updates within one pump pass', async () => {
     const { observer, activeNotes } = recordingObserver();
     ctx.engine.setObserver(observer);
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
 
     await ctx.engine.play();
 
@@ -406,7 +445,7 @@ describe('RNSamplePlaybackEngine', () => {
   it('reports position while playing', async () => {
     const { observer, ticks } = recordingObserver();
     ctx.engine.setObserver(observer);
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
     await ctx.engine.play();
     ticks.length = 0;
 
@@ -417,7 +456,7 @@ describe('RNSamplePlaybackEngine', () => {
   });
 
   it('stops the pump and silences everything on pause', async () => {
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
     await ctx.engine.play();
     ctx.step();
     const scheduled = ctx.graph.sources.length;
@@ -431,7 +470,7 @@ describe('RNSamplePlaybackEngine', () => {
   it('reports the current tick before pausing so the caret does not jump to the last sample', async () => {
     const { observer, ticks } = recordingObserver();
     ctx.engine.setObserver(observer);
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
     await ctx.engine.play();
     ticks.length = 0;
 
@@ -442,13 +481,13 @@ describe('RNSamplePlaybackEngine', () => {
   });
 
   it('schedules metronome clicks only when the metronome is on', async () => {
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
     await ctx.engine.play();
     ctx.step();
     expect(ctx.graph.oscillators).toHaveLength(0);
 
     const withClick = makeEngine();
-    await withClick.engine.loadScore(twoTrackScore());
+    await withClick.engine.load(twoTrackPlan());
     withClick.engine.setMetronome(true);
     await withClick.engine.play();
     withClick.step();
@@ -461,11 +500,11 @@ describe('RNSamplePlaybackEngine', () => {
   it('auditions a key without touching transport state', async () => {
     const { observer, states, ticks } = recordingObserver();
     ctx.engine.setObserver(observer);
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
     states.length = 0;
     ticks.length = 0;
 
-    ctx.engine.noteOn(60, 0);
+    ctx.engine.noteOn(60, { program: 0, name: 'Acoustic Grand Piano', isPercussion: false });
     await vi.waitFor(() => expect(ctx.graph.sources.length).toBeGreaterThan(0));
 
     expect(states).toEqual([]);
@@ -476,14 +515,14 @@ describe('RNSamplePlaybackEngine', () => {
     const failing = makeEngine({ fetchPack: async () => '<!doctype html><title>404</title>' });
     const { observer, loads } = recordingObserver();
     failing.engine.setObserver(observer);
-    await failing.engine.loadScore(twoTrackScore());
+    await failing.engine.load(twoTrackPlan());
 
     await expect(failing.engine.play()).rejects.toThrow(/not a MIDI\.js sample pack/i);
     expect(loads[loads.length - 1]).toMatchObject({ status: 'failed' });
   });
 
   it('closes the audio context on dispose', async () => {
-    await ctx.engine.loadScore(twoTrackScore());
+    await ctx.engine.load(twoTrackPlan());
     await ctx.engine.play();
     ctx.engine.dispose();
 
@@ -497,8 +536,8 @@ describe('RNSamplePlaybackEngine expression', () => {
     // response: ~5kHz at v96 down to ~556Hz at v16. Without the filter every
     // dynamic sounds like the same recording at a different volume.
     const local = makeEngine();
-    const score = twoTrackScore();
-    await local.engine.loadScore(score);
+    const plan = twoTrackPlan();
+    await local.engine.load(plan);
     await local.engine.play();
     local.step();
 
@@ -511,12 +550,21 @@ describe('RNSamplePlaybackEngine expression', () => {
     // The truncation bug: every pack entry is 3.13s, so a long note simply
     // stopped sounding partway through with the envelope holding over nothing.
     const local = makeEngine();
-    let score = twoTrackScore();
     // Strings, because only a sustaining instrument may be looped — piano and
-    // acoustic bass are both already decaying and must never be.
-    score = changeTrackPropsCommand(score.tracks[1]!.id, { midiProgram: 48 }).execute(score);
-    // The bass part is whole notes; slow the tempo so one outlasts a sample.
-    await local.engine.loadScore({ ...score, tempoMap: [{ id: 'slow', tick: 0, bpm: 30 }] });
+    // acoustic bass are both already decaying and must never be. The note is
+    // long enough in seconds to outlast a 3.13s recording.
+    const base = twoTrackPlan();
+    const plan = testPlan({
+      ...base,
+      tracks: base.tracks.map((t) =>
+        t.id === 'bass'
+          ? { ...t, midiProgram: 48, voiceProgram: 48, voiceName: 'String Ensemble 1' }
+          : t,
+      ),
+      notes: [testNote({ trackId: 'bass', tick: 0, durTicks: 480 * 8, midi: 48, noteId: 'long' })],
+      tempo: SLOW_TEMPO,
+    });
+    await local.engine.load(plan);
     await local.engine.play();
     for (let t = 0; t <= 4; t += 0.5) {
       local.graph.currentTime = t;
@@ -528,8 +576,8 @@ describe('RNSamplePlaybackEngine expression', () => {
 
   it('never loops a drum, whose decay is already the recording', async () => {
     const local = makeEngine();
-    const { score } = scoreWithDrums();
-    await local.engine.loadScore({ ...score, tempoMap: [{ id: 'slow', tick: 0, bpm: 30 }] });
+    const { plan: drums } = planWithDrums();
+    await local.engine.load(testPlan({ ...drums, tempo: SLOW_TEMPO }));
     await local.engine.play();
     for (let t = 0; t <= 4; t += 0.5) {
       local.graph.currentTime = t;
@@ -550,8 +598,8 @@ describe('RNSamplePlaybackEngine percussion', () => {
         return name.startsWith('percussion_') ? kitBody(name) : packBody(name);
       },
     });
-    const { score } = scoreWithDrums();
-    await local.engine.loadScore(score);
+    const { plan } = planWithDrums();
+    await local.engine.load(plan);
     await local.engine.play();
 
     // Program 25 is the TR-808 kit AND, on a pitched track, a Violin. Reading
@@ -570,8 +618,8 @@ describe('RNSamplePlaybackEngine percussion', () => {
         return name.startsWith('percussion_') ? kitBody(name) : packBody(name);
       },
     });
-    const { score } = scoreWithDrums();
-    await local.engine.loadScore(score);
+    const { plan } = planWithDrums();
+    await local.engine.load(plan);
     await local.engine.play();
 
     const kitUrl = fetched.find((u) => u.includes('percussion_25'))!;
@@ -580,8 +628,8 @@ describe('RNSamplePlaybackEngine percussion', () => {
 
   it('sounds drums, and leaves an undefined slot silent rather than bending to it', async () => {
     const local = makeEngine();
-    const { score } = scoreWithDrums();
-    await local.engine.loadScore(score);
+    const { plan } = planWithDrums();
+    await local.engine.load(plan);
     await local.engine.play();
 
     // Walk the clock past measure 2. The lookahead is 0.2s, so a single pump
@@ -609,9 +657,9 @@ describe('RNSamplePlaybackEngine percussion', () => {
         return name.startsWith('percussion_') ? kitBody(name) : packBody(name);
       },
     });
-    await local.engine.loadScore(twoTrackScore());
+    await local.engine.load(twoTrackPlan());
 
-    local.engine.noteOn(38, 25, true); // snare, on the TR-808 kit
+    local.engine.noteOn(38, { program: 25, name: 'TR-808 Kit', isPercussion: true }); // snare
     await vi.waitFor(() => expect(local.graph.sources.length).toBeGreaterThan(0));
 
     expect(fetched.some((u) => u.includes('percussion_25-mp3.js'))).toBe(true);
@@ -627,8 +675,8 @@ describe('RNSamplePlaybackEngine percussion', () => {
       fetchPack: async () => kitBody('percussion_25'),
       startPump: () => () => undefined,
     });
-    const { score } = scoreWithDrums();
-    await bare.loadScore(score);
+    const { plan } = planWithDrums();
+    await bare.load(plan);
 
     await expect(bare.play()).rejects.toThrow(/percussionBase/);
   });

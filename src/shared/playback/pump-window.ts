@@ -20,7 +20,7 @@
  * skipping — see `soundfont-engine.ts`'s `HORIZON_SECONDS`. RN has no sequencer
  * to hand a horizon to and keeps this model.
  */
-import type { ScheduledNote } from './schedule.js';
+import type { PlaybackNote as ScheduledNote } from '@sudobility/music_types';
 
 export type Dispatch = { note: ScheduledNote; atSeconds: number };
 

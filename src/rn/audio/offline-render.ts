@@ -16,7 +16,6 @@
  * the release.
  */
 import type { AudioRenderer, DecodedAudio, RenderPlan, RenderTrack } from '@sudobility/music_types';
-import { gmKitAt, gmInstrument } from '@sudobility/music_lib';
 import { headroomTrimFor } from '../../shared/playback/mix.js';
 import { gmPackName, percussionPackName } from '../playback/gm-pack-name.js';
 import { PackLibrary } from '../playback/pack-library.js';
@@ -39,9 +38,11 @@ export type OfflineRendererDeps = {
 
 /** The pack a track's notes come from — the same rule live playback uses. */
 export function packNameForRenderTrack(track: RenderTrack): string | null {
-  if (track.isPercussion) return percussionPackName(gmKitAt(track.midiProgram).program);
-  const instrument = gmInstrument(track.midiProgram);
-  return instrument ? gmPackName(track.midiProgram, instrument.name) : null;
+  // The kit-versus-instrument distinction is already resolved into
+  // `voiceProgram`/`voiceName` by music_lib, which owns the GM tables.
+  return track.isPercussion
+    ? percussionPackName(track.voiceProgram)
+    : gmPackName(track.voiceProgram, track.voiceName);
 }
 
 function defaultFetchPack(url: string): Promise<string> {

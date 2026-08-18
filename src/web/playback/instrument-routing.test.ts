@@ -8,7 +8,7 @@
  * misrouted instrument is still observable.
  */
 import { describe, expect, it, vi } from 'vitest';
-import type { Score } from '@sudobility/music_types';
+import { planOfTracks } from '../../shared/playback/test-plan.js';
 import { SoundfontPlaybackEngine } from './soundfont-engine.js';
 import { allocateChannels } from './channel-allocator.js';
 
@@ -58,27 +58,6 @@ function engineWith() {
   return { host, engine };
 }
 
-function scoreOfTracks(count: number, clef: 'treble' | 'percussion' = 'treble'): Score {
-  return {
-    id: 's',
-    title: 't',
-    ppq: 480,
-    tempoMap: [{ tick: 0, bpm: 120 }],
-    tracks: Array.from({ length: count }, (_, i) => ({
-      id: `t${i}`,
-      name: `t${i}`,
-      instrumentName: 'x',
-      midiProgram: i,
-      midiChannel: 0,
-      clef,
-      volume: 1,
-      pan: 0,
-      muted: false,
-      solo: false,
-      measures: [],
-    })),
-  } as unknown as Score;
-}
 
 describe('instrument routing', () => {
   it('opens as many synths as the allocation needs, not always one', async () => {
@@ -88,12 +67,12 @@ describe('instrument routing', () => {
     // exist — they played nothing at all, with no error anywhere. The boundary
     // was seventeen parts when an instance was sixteen channels wide.
     const { host, engine } = engineWith();
-    const score = scoreOfTracks(241);
-    await engine.loadScore(score);
+    const plan = planOfTracks(241);
+    await engine.load(plan);
     await engine.initialize();
 
     const { instanceCount } = allocateChannels(
-      score.tracks.map((t) => ({ id: t.id, isPercussion: false })),
+      plan.tracks.map((t) => ({ id: t.id, isPercussion: false })),
     );
     expect(instanceCount).toBe(2);
     expect(host.init.mock.calls[0][1].instanceCount).toBe(2);
@@ -102,18 +81,18 @@ describe('instrument routing', () => {
   it('keeps a seventeen-part score on one synth', async () => {
     // What used to need two instances, and a second 23MB copy of the soundfont.
     const { host, engine } = engineWith();
-    await engine.loadScore(scoreOfTracks(17));
+    await engine.load(planOfTracks(17));
     await engine.initialize();
     expect(host.init.mock.calls[0][1].instanceCount).toBe(1);
   });
 
   it('grows the host when a bigger score is loaded after start-up', async () => {
     const { host, engine } = engineWith();
-    await engine.loadScore(scoreOfTracks(2));
+    await engine.load(planOfTracks(2));
     await engine.initialize();
     expect(host.init.mock.calls[0][1].instanceCount).toBe(1);
 
-    await engine.loadScore(scoreOfTracks(241));
+    await engine.load(planOfTracks(241));
     expect(host.ensureInstances).toHaveBeenCalledWith(2);
   });
 
@@ -122,17 +101,17 @@ describe('instrument routing', () => {
     // key selected the audition's program on a real track, which then played
     // the wrong instrument until the next edit reloaded the score.
     const { host, engine } = engineWith();
-    const score = scoreOfTracks(16);
-    await engine.loadScore(score);
+    const plan = planOfTracks(16);
+    await engine.load(plan);
     await engine.initialize();
 
     const { assignments } = allocateChannels(
-      score.tracks.map((t) => ({ id: t.id, isPercussion: false })),
+      plan.tracks.map((t) => ({ id: t.id, isPercussion: false })),
     );
     const owned = new Set([...assignments.values()].map((a) => `${a.instance}:${a.channel}`));
 
     host.programSelect.mockClear();
-    engine.noteOn(60, 12, false);
+    engine.noteOn(60, { program: 12, name: 'x', isPercussion: false });
     const [instance, channel] = host.programSelect.mock.calls[0];
     expect(owned.has(`${instance}:${channel}`)).toBe(false);
     expect(host.noteOn).toHaveBeenCalledWith(instance, channel, 60, expect.any(Number));
@@ -143,11 +122,11 @@ describe('instrument routing', () => {
     // that channel's volume — a muted drum track made the keyboard silent —
     // and ignored the kit, sounding Standard for a track playing TR-808.
     const { host, engine } = engineWith();
-    await engine.loadScore(scoreOfTracks(1, 'percussion'));
+    await engine.load(planOfTracks(1, true));
     await engine.initialize();
 
     host.setChannelPercussion.mockClear();
-    engine.noteOn(38, 25, true);
+    engine.noteOn(38, { program: 25, name: 'TR-808 Kit', isPercussion: true });
     const [instance, channel, kit] = host.setChannelPercussion.mock.calls[0];
     expect(kit).toBe(25);
     expect(channel).not.toBe(9);

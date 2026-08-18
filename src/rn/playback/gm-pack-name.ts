@@ -41,6 +41,19 @@ const RENAMED: Record<number, string> = {
  * Takes the name rather than looking it up, so this module stays free of
  * music_lib's catalogue and the mapping rule can be tested on its own.
  */
+import PACK_NAMES_JSON from './pack-names.json' with { type: 'json' };
+
+/**
+ * Every pack the CDN serves, vendored.
+ *
+ * Exported so the "every GM program resolves to a pack that exists" sweep can
+ * live in music_lib, which owns the catalogue the mapping starts from. That
+ * check spans both packages, so it cannot sit wholly in either — and it is the
+ * one that matters: a name that misses resolves to a 404, which parses to no
+ * samples, which is an instrument that plays nothing.
+ */
+export const PACK_NAMES: readonly string[] = PACK_NAMES_JSON;
+
 export function gmPackName(program: number, instrumentName: string): string {
   const renamed = RENAMED[program];
   if (renamed) return renamed;

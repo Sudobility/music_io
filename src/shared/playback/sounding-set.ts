@@ -14,7 +14,7 @@
  * nothing.
  */
 import type { SoundingNote } from '@sudobility/music_types';
-import type { ScheduledNote } from './schedule.js';
+import type { PlaybackNote as ScheduledNote } from '@sudobility/music_types';
 
 export class SoundingSet {
   private byStart: Array<{ note: SoundingNote; startSeconds: number }> = [];

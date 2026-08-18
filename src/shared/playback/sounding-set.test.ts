@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SoundingSet } from './sounding-set.js';
-import type { ScheduledNote } from './schedule.js';
+import type { PlaybackNote as ScheduledNote } from '@sudobility/music_types';
 
 /** Ticks are seconds here, so the arithmetic in the assertions is readable. */
 const seconds = (tick: number) => tick;

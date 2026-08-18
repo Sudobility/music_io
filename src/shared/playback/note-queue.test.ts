@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NoteQueue } from './note-queue.js';
-import type { ScheduledNote } from './schedule.js';
+import type { PlaybackNote as ScheduledNote } from '@sudobility/music_types';
 
 const note = (tick: number, id: string): ScheduledNote => ({
   tick,

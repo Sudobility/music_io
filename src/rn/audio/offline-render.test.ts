@@ -158,8 +158,26 @@ function makeRenderer(overrides: { fetchPack?: (url: string) => Promise<string> 
   return { renderer, graph, fetched };
 }
 
-const PIANO = { id: 't1', midiProgram: 0, instrumentName: 'Acoustic Grand Piano', isPercussion: false, volume: 1, pan: 0 };
-const DRUMS = { id: 't2', midiProgram: 25, instrumentName: 'TR-808 Kit', isPercussion: true, volume: 1, pan: 0 };
+const PIANO = {
+  id: 't1',
+  midiProgram: 0,
+  instrumentName: 'Acoustic Grand Piano',
+  isPercussion: false,
+  volume: 1,
+  pan: 0,
+  voiceProgram: 0,
+  voiceName: 'Acoustic Grand Piano',
+};
+const DRUMS = {
+  id: 't2',
+  midiProgram: 25,
+  instrumentName: 'TR-808 Kit',
+  isPercussion: true,
+  volume: 1,
+  pan: 0,
+  voiceProgram: 25,
+  voiceName: 'TR-808 Kit',
+};
 
 function plan(overrides: Partial<RenderPlan> = {}): RenderPlan {
   return {
@@ -173,10 +191,16 @@ function plan(overrides: Partial<RenderPlan> = {}): RenderPlan {
 describe('packNameForRenderTrack', () => {
   it('reads a percussion track as a kit, never as an instrument', () => {
     // Program 25 addresses the TR-808 kit on a drum track and a steel-string
-    // guitar on a pitched one. The two never agree, which is the whole reason
-    // this goes through `gmKitAt` rather than the instrument table.
+    // guitar on a pitched one. The two never agree — which is why music_lib
+    // resolves the voice and this only reads the answer.
     expect(packNameForRenderTrack(DRUMS)).toBe('percussion_25');
-    expect(packNameForRenderTrack({ ...DRUMS, isPercussion: false })).toBe('acoustic_guitar_steel');
+    expect(
+      packNameForRenderTrack({
+        ...DRUMS,
+        isPercussion: false,
+        voiceName: 'Acoustic Guitar (steel)',
+      }),
+    ).toBe('acoustic_guitar_steel');
   });
 });
 

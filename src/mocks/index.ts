@@ -5,7 +5,14 @@
  * music_lib's and music_app's tests exercise the same fakes this package's own
  * contract suite does.
  */
-import type { FileExporter, PlaybackEngine, PlaybackObserver, Score } from '@sudobility/music_types';
+import type {
+  AuditionVoice,
+  FileExporter,
+  PlaybackEngine,
+  PlaybackObserver,
+  PlaybackPlan,
+  PlaybackTrack,
+} from '@sudobility/music_types';
 import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
 import { SharedTrackerCodec } from '../shared/mod/codec.js';
 import { createMockAudioCodec } from './audio-codec.js';
@@ -16,7 +23,8 @@ import type { MusicIo } from '../shared/types.js';
 export class MockPlaybackEngine implements PlaybackEngine {
   readonly calls: string[] = [];
   observer: PlaybackObserver | null = null;
-  loadedScore: Score | null = null;
+  /** The plan the engine was last handed, for tests to assert on. */
+  loadedPlan: PlaybackPlan | null = null;
 
   private record(name: string): void {
     this.calls.push(name);
@@ -26,9 +34,9 @@ export class MockPlaybackEngine implements PlaybackEngine {
     this.record('initialize');
   }
 
-  async loadScore(score: Score): Promise<void> {
-    this.loadedScore = score;
-    this.record('loadScore');
+  async load(plan: PlaybackPlan): Promise<void> {
+    this.loadedPlan = plan;
+    this.record('load');
   }
 
   async play(fromTick?: number): Promise<void> {
@@ -63,8 +71,8 @@ export class MockPlaybackEngine implements PlaybackEngine {
     this.record(`setTrackSolo(${trackId},${solo})`);
   }
 
-  applyMix(score: Score): void {
-    this.record(`applyMix(${score.tracks.length})`);
+  applyMix(tracks: readonly PlaybackTrack[]): void {
+    this.record(`applyMix(${tracks.length})`);
   }
 
   setMetronome(enabled: boolean): void {
@@ -75,8 +83,8 @@ export class MockPlaybackEngine implements PlaybackEngine {
     this.record(`setMasterVolume(${volume})`);
   }
 
-  noteOn(midi: number, program: number): void {
-    this.record(`noteOn(${midi},${program})`);
+  noteOn(midi: number, voice: AuditionVoice): void {
+    this.record(`noteOn(${midi},${voice.program})`);
   }
 
   noteOff(midi: number): void {

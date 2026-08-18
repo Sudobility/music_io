@@ -11,7 +11,7 @@
  * unit, and converting them depends on the tempo map and the playback-speed
  * multiplier, both of which belong to the engine.
  */
-import type { ScheduledNote } from './schedule.js';
+import type { PlaybackNote as ScheduledNote } from '@sudobility/music_types';
 
 export class NoteQueue {
   private notes: ScheduledNote[] = [];

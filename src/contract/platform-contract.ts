@@ -22,7 +22,7 @@ export type PlatformCapabilities = {
 };
 
 /** Sound comes out of these, so a platform that cannot must say so loudly. */
-const SOUND_PRODUCING = ['initialize', 'loadScore', 'play', 'noteOn'] as const;
+const SOUND_PRODUCING = ['initialize', 'load', 'play', 'noteOn'] as const;
 
 /**
  * These must stay silent even on a platform with no audio: a shared component
