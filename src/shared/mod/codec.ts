@@ -12,6 +12,7 @@ import { readDsm } from '../tracker/dsm.js';
 import { readIt } from '../tracker/it.js';
 import { readS3m } from '../tracker/s3m.js';
 import { readXm } from '../tracker/xm.js';
+import { encodeXm } from '../tracker/xm-write.js';
 
 /** For signatures longer than four bytes; `fourCC` cannot express XM's 17-character one. */
 function asciiAt(bytes: Uint8Array, at: number, length: number): string {
@@ -44,5 +45,17 @@ export class SharedTrackerCodec implements TrackerCodec {
     // MOD's magic sits at 1080, past the header, and `readMod` validates it —
     // so it is the fallback rather than something sniffed twice.
     return readMod(bytes);
+  }
+
+  /**
+   * Writes a module out in the format it names.
+   *
+   * Only the formats export supports are written; DSM and MPTM are import-only
+   * by design, and throwing names the format rather than silently writing a
+   * near neighbour the user did not ask for.
+   */
+  encode(module: TrackerModule): ArrayBuffer {
+    if (module.format === 'xm') return encodeXm(module);
+    throw new Error(`Writing "${module.format}" is not supported yet`);
   }
 }
