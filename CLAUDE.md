@@ -32,6 +32,7 @@ on both platforms.
 
 ## Gotchas
 
+- **This package must not import `@sudobility/music_lib`.** It is the platform layer — bytes, audio, files — and music_lib is the domain. `src/contract/no-music-lib.test.ts` enforces it over both `src/` and `package.json`. The rule held once and was lost gradually: `PlaybackEngine.loadScore` took a `Score`, and an engine holding a score then needed tempo maths, tie joining and the GM tables to do anything with it. By the end the two packages were mutually dependent and neither could be type-checked at release time until the other had published. Engines now take a `PlaybackPlan` — notes in ticks with their ids, metronome clicks, tracks with their **resolved** GM voice, and tick↔second conversion as a `TempoConversion` — so every musical question is already answered before the platform layer sees it. Engine tests build plans with `shared/playback/test-plan.ts` rather than importing a score fixture.
 - **Platform *engines* are optional peers; `@breezystack/lamejs` is the one
   exception.** A React Native app must never pull a browser audio library into
   its graph, which is why `js-synthesizer` — libfluidsynth compiled to WASM, for
