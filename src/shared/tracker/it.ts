@@ -108,7 +108,6 @@ function unpackPattern(
   const lastMask = new Uint8Array(MAX_CHANNELS);
   const lastNote = new Uint8Array(MAX_CHANNELS);
   const lastInstrument = new Uint8Array(MAX_CHANNELS);
-  const lastVolume = new Uint8Array(MAX_CHANNELS);
   const lastCommand = new Uint8Array(MAX_CHANNELS);
   const lastParam = new Uint8Array(MAX_CHANNELS);
 
@@ -141,11 +140,9 @@ function unpackPattern(
       lastInstrument[channel] = bytes[pos];
       pos += 1;
     }
-    if (mask & 4) {
-      // Volume is read for byte accounting and discarded, as everywhere else.
-      lastVolume[channel] = bytes[pos];
-      pos += 1;
-    }
+    // Volume is skipped, not stored: it is read for byte accounting only, as
+    // in every other reader here, so remembering it had no reader.
+    if (mask & 4) pos += 1;
     if (mask & 8) {
       lastCommand[channel] = bytes[pos];
       lastParam[channel] = bytes[pos + 1];

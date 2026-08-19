@@ -12,7 +12,6 @@
  * readable.
  */
 import type {
-  MetronomeClick,
   PlaybackNote,
   PlaybackPlan,
   PlaybackTrack,
@@ -105,5 +104,3 @@ export function twoTrackPlan(): PlaybackPlan {
   }));
   return testPlan({ tracks, notes, clicks });
 }
-
-export type { MetronomeClick };
