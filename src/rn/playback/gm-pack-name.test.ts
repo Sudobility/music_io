@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { gmPackName } from './gm-pack-name.js';
+import { GM_INSTRUMENTS } from '@sudobility/music_types';
+import { gmPackName, PACK_NAMES } from './gm-pack-name.js';
 
 describe('gmPackName', () => {
   it('removes punctuation rather than separating on it', () => {
@@ -14,5 +15,26 @@ describe('gmPackName', () => {
 
   it('uses the GM standard name for program 54, which the catalogue calls something else', () => {
     expect(gmPackName(54, 'Synth Voice')).toBe('voice_oohs');
+  });
+});
+
+describe('GM pack coverage', () => {
+  const available = new Set<string>(PACK_NAMES);
+
+  it('names a pack that exists for every one of the 128 GM programs', () => {
+    // The check that matters. A name that misses resolves to a 404, which
+    // parses to no samples, which is an instrument that plays nothing.
+    //
+    // It lived in music_lib for a while, because the catalogue did. Now that
+    // `GM_INSTRUMENTS` is in music_types this can sit beside the rule it
+    // tests, and music_lib needs no dependency on this package for it.
+    const missing = GM_INSTRUMENTS.filter(
+      (i) => !available.has(gmPackName(i.program, i.name)),
+    ).map((i) => `${i.program} "${i.name}" -> ${gmPackName(i.program, i.name)}`);
+    expect(missing).toEqual([]);
+  });
+
+  it('covers the whole catalogue, so no program silently has no rule', () => {
+    expect(GM_INSTRUMENTS).toHaveLength(128);
   });
 });

@@ -1,5 +1,10 @@
 # music_io
 
+> **Git policy — never auto-commit or auto-push.** Leave your work in the working tree.
+> Run `git commit`, `git push`, `gh pr create`, or `scripts/push_all.sh` **only when the user
+> explicitly asks in that turn**. Approval for an earlier change does not carry forward, and
+> finishing a task is not permission to commit it.
+
 Platform implementations for ScoreSmith: playback, XML parsing, file export and
 the MIDI codec, for web and React Native. One of six repos in the family — see
 `music_app/docs/architecture.md`.
@@ -282,3 +287,7 @@ on both platforms.
 - `music_lib` — domain model, commands, store; platform-free
 - `music_app` — the web app; its composition root wires this package
 - `music_client`, `music_api` — networking and backend
+
+## Git Workflow
+
+- Do not use feature branches for code changes. Always stay on the current branch.
