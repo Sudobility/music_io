@@ -60,6 +60,9 @@ export function testPlan(over: Partial<PlaybackPlan> = {}): PlaybackPlan {
     notes,
     clicks: over.clicks ?? [],
     tempo: over.tempo ?? LINEAR_TEMPO,
+    // Identity by default: an engine test is about scheduling, not repeats,
+    // and this is what a score with no repeats produces.
+    timeline: over.timeline ?? { segments: [], durationTicks: 0 },
     durationTicks:
       over.durationTicks ?? notes.reduce((n, note) => Math.max(n, note.tick + note.durTicks), 0),
   };
