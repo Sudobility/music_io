@@ -5,7 +5,7 @@
 > explicitly asks in that turn**. Approval for an earlier change does not carry forward, and
 > finishing a task is not permission to commit it.
 
-Platform implementations for ScoreSmith: playback, XML parsing, file export and
+Platform implementations for Moosiac: playback, XML parsing, file export and
 the MIDI codec, for web and React Native. One of six repos in the family — see
 `music_app/docs/architecture.md`.
 

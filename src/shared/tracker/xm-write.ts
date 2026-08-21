@@ -119,7 +119,7 @@ export function encodeXm(module: TrackerModule): ArrayBuffer {
   ascii(out, 0, SIGNATURE, 17);
   ascii(out, 17, module.title, 20);
   out[37] = 0x1a;
-  ascii(out, 38, 'ScoreSmith', 20);
+  ascii(out, 38, 'Moosiac', 20);
   view.setUint16(58, 0x0104, true);
   view.setUint32(60, HEADER_SIZE, true);
   view.setUint16(64, module.order.length, true);

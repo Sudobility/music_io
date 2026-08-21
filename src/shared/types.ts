@@ -3,6 +3,7 @@ import type {
   AudioRenderer,
   FileExporter,
   MidiCodec,
+  MidiInput,
   TrackerCodec,
   PlaybackEngine,
   XmlParser,
@@ -22,4 +23,6 @@ export type MusicIo = {
   audioCodec: AudioCodec;
   audioRenderer: AudioRenderer;
   fileExporter: FileExporter;
+  /** Live MIDI keyboard input. A platform without ports reports `isSupported()` false. */
+  midiInput: MidiInput;
 };

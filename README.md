@@ -1,6 +1,6 @@
 # music_io
 
-Platform IO implementations for ScoreSmith.
+Platform IO implementations for Moosiac.
 
 This package implements the platform interfaces from `@sudobility/music_types`:
 playback, offline audio rendering, audio codecs, XML parsing, MIDI/MOD codecs,

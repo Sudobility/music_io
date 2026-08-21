@@ -2,6 +2,7 @@
  * Web platform implementations. Resolved by any bundler that is not Metro,
  * through the `default` branch of this package's export condition.
  */
+import { createWebMidiInput } from './midi/web-midi-input.js';
 import { WebXmlParser } from './xml/xml.web.js';
 import { WebFileExporter } from './file/file.web.js';
 import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
@@ -74,6 +75,7 @@ export function createMusicIo({
         loadFont: async (url) => loadSoundfont(url, { cache: await openSoundfontCache() }),
       }),
     },
+    midiInput: createWebMidiInput(),
     fileExporter: new WebFileExporter(),
   };
 }

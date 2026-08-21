@@ -3,6 +3,7 @@
  * `react-native` branch of this package's export condition, so app code imports
  * `@sudobility/music_io` and never branches on platform.
  */
+import { createUnsupportedMidiInput } from '../shared/midi/unsupported-midi-input.js';
 import { RNXmlParser } from './xml/xml.rn.js';
 import { RNFileExporter } from './file/file.rn.js';
 import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
@@ -74,6 +75,7 @@ export function createMusicIo(options: RNMusicIoOptions = {}): MusicIo {
       packBase: options.packBase,
       percussionBase: options.percussionBase,
     }),
+    midiInput: createUnsupportedMidiInput(),
     fileExporter: new RNFileExporter(),
   };
 }

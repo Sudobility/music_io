@@ -5,6 +5,7 @@
  * music_lib's and music_app's tests exercise the same fakes this package's own
  * contract suite does.
  */
+import { createUnsupportedMidiInput } from '../shared/midi/unsupported-midi-input.js';
 import type {
   AuditionVoice,
   FileExporter,
@@ -134,6 +135,7 @@ export function createMusicIo(): MusicIo {
       // No audio context here; rendering is a browser capability.
       render: () => Promise.reject(new Error('Offline audio rendering is not available on this platform')),
     },
+    midiInput: createUnsupportedMidiInput(),
     fileExporter: new MockFileExporter(),
   };
 }
