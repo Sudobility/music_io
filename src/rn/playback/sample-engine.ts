@@ -45,6 +45,7 @@ import type {
   TransportPlaybackState,
 } from '@sudobility/music_types';
 import { NoteQueue } from '../../shared/playback/note-queue.js';
+import { SoundingSet } from '../../shared/playback/sounding-set.js';
 import { planDispatch } from '../../shared/playback/pump-window.js';
 import { headroomTrimFor } from '../../shared/playback/mix.js';
 import { gmPackName, percussionPackName } from './gm-pack-name.js';
@@ -54,7 +55,14 @@ import type { VoicePlan } from './voice-plan.js';
 import { sustains } from './expression.js';
 import { loadAudioApi } from './audio-api.js';
 export { base64ToBytes } from './pack-library.js';
-import type { AudioApi, RNAudioBuffer, RNAudioContext, RNGainNode } from './audio-api.js';
+import type {
+  AudioApi,
+  RNAudioBuffer,
+  RNAudioContext,
+  RNAudioNode,
+  RNGainNode,
+  RNStereoPanner,
+} from './audio-api.js';
 import { applySustainLoop } from './sustain-loop.js';
 
 /** How often the pump looks for notes to schedule. */
@@ -91,10 +99,18 @@ export type SampleEngineDeps = {
 type Voice = {
   source: { stop(when?: number): void; disconnect(): unknown };
   gain: RNGainNode;
-  /** Resolved at scheduling time, so reporting never has to search the score. */
-  sounding?: SoundingNote;
   endsAt: number;
 };
+
+/**
+ * A track's own strip: level, then position, then the master.
+ *
+ * One pair per track rather than per voice. Per-voice panners are what the
+ * offline renderer does, because it schedules everything once and never has to
+ * change its mind; live, a fader has to move under notes that are already
+ * sounding, which only a node the voices share can do.
+ */
+type TrackStrip = { gain: RNGainNode; panner: RNStereoPanner };
 
 function defaultFetchPack(url: string): Promise<string> {
   return fetch(url).then((r) => {
@@ -144,10 +160,27 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
 
   private readonly muted = new Set<string>();
   private readonly soloed = new Set<string>();
+  /**
+   * Volume and pan per track, held apart from `plan` because `applyMix` is
+   * allowed to change them without the plan being rebuilt — that is the whole
+   * reason it exists.
+   */
+  private readonly mix = new Map<string, { volume: number; pan: number }>();
+  private readonly strips = new Map<string, TrackStrip>();
   private readonly voices: Voice[] = [];
+  /** Clicks already on the graph, so pause and stop can take them back. */
+  private readonly pendingClicks: Array<{ osc: { stop(when?: number): void }; endsAt: number }> = [];
   private readonly auditioned = new Map<number, Voice>();
+  /**
+   * What is sounding, read off the clock rather than off the voice list.
+   *
+   * Deriving it from the voices lit every note the moment it was *scheduled* —
+   * a lookahead early — and held it lit through the release tail, so the
+   * notation ran ahead of the sound and lagged behind its end. The web engine
+   * has always used this; sharing it is what stops the two drifting.
+   */
+  private readonly sounding = new SoundingSet();
   private activeNotes: SoundingNote[] = [];
-  private activeNotesDirty = false;
 
   constructor(deps: SampleEngineDeps = {}) {
     this.deps = {
@@ -166,7 +199,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     const api = await this.deps.loadAudioApi();
     const ctx = new api.AudioContext();
     const master = ctx.createGain();
-    master.gain.value = this.masterVolume;
+    master.gain.value = this.masterVolume * this.headroom;
     master.connect(ctx.destination);
     this.api = api;
     this.ctx = ctx;
@@ -181,12 +214,22 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
 
   async load(plan: PlaybackPlan): Promise<void> {
     this.stopAllVoices();
+    // The strips belong to the tracks of the plan being replaced; keeping them
+    // would leave a departed track's fader in the graph and a returning one
+    // holding the old score's level.
+    this.releaseStrips();
     this.plan = plan;
     this.tempo = plan.tempo;
     this.queue.load(plan.notes);
+    this.sounding.load(plan.notes, (tick) => plan.tempo.ticksToSeconds(tick));
     this.clicks = plan.clicks;
     this.clickCursor = 0;
     this.headroom = headroomTrimFor(plan.tracks.length);
+    this.applyMasterGain();
+    this.mix.clear();
+    for (const track of plan.tracks) {
+      this.mix.set(track.id, { volume: track.volume, pan: track.pan });
+    }
     this.seek(0);
   }
 
@@ -255,6 +298,9 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     this.originContextTime = this.ctx!.currentTime;
     this.originTick = this.positionTick;
     this.setState('playing');
+    // Pressing play while already playing must not leave the first pump
+    // running: its handle would be overwritten and nothing could ever stop it.
+    this.haltPump();
     this.stopPump = this.deps.startPump(() => this.pump(), PUMP_INTERVAL_MS);
     this.stopPositionTimer = this.deps.startPump(() => this.reportPosition(), POSITION_TICK_INTERVAL_MS);
     this.pump();
@@ -284,7 +330,9 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     if (this.clickCursor < 0) this.clickCursor = this.clicks.length;
     this.originTick = this.positionTick;
     this.originContextTime = this.ctx?.currentTime ?? 0;
-    this.activeNotesDirty = false;
+    // A note spanning this moment is deliberately not restored: a seek silences
+    // the voices, so colouring it would be a lie. See `sounding-set.ts`.
+    this.sounding.reset(this.tempo?.ticksToSeconds(this.positionTick) ?? 0);
     this.setActiveNotes([]);
     this.observer?.onPositionTick(this.positionTick);
   }
@@ -320,7 +368,15 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
 
   private reportPosition(): void {
     this.positionTick = this.currentTick();
+    this.reportSounding();
     this.observer?.onPositionTick(this.positionTick);
+  }
+
+  /** The lit set, at the clock's position, and only when it has changed. */
+  private reportSounding(): void {
+    if (!this.tempo) return;
+    const notes = this.sounding.advanceTo(this.tempo.ticksToSeconds(this.positionTick));
+    if (notes) this.setActiveNotes(notes);
   }
 
   // ---- the pump ----------------------------------------------------------
@@ -333,15 +389,21 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     const horizonTick = this.tickAtContextTime(now + LOOKAHEAD_SECONDS);
 
     if (this.loop && horizonTick >= this.loop.endTick) {
-      this.drainThrough(this.loop.endTick, now);
+      // The end tick itself belongs to the next pass, where it is the loop's
+      // own first beat — dispatching it here plays it twice at the same moment.
+      this.drainThrough(this.loop.endTick - 1, now);
+      // Read *before* the seek. `seek` re-anchors the origin on the current
+      // moment, so asking afterwards answers "when would the end come round if
+      // the loop started this instant" — a whole loop late — and the engine
+      // then played nothing at all until real time caught up with its answer.
+      const wrapsAt = this.secondsForTick(this.loop.endTick);
       this.seek(this.loop.startTick);
-      this.originContextTime = this.secondsForTick(this.loop.endTick);
+      this.originContextTime = wrapsAt;
       this.originTick = this.loop.startTick;
       return;
     }
 
     this.drainThrough(horizonTick, now);
-    this.flushActiveNotes();
 
     if (this.queue.exhausted && this.voices.length === 0 && !this.loop) {
       this.stop();
@@ -389,17 +451,67 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
       atSeconds,
       durationSeconds,
       velocity: note.velocity,
-      trackGain: this.headroom,
+      // Unity here: the track's level lives on its strip, where a fader can
+      // still move it after the note has started, and the headroom lives on the
+      // master — the same division the web engine and the offline renderer use.
+      trackGain: 1,
       choice,
       // Percussion has no melodic expression: a kit's programs address kits,
       // and a drum is a one-shot whose decay is already in the recording.
       program: track?.isPercussion ? undefined : program,
     });
 
-    const voice = this.buildVoiceFromPlan(buffer, plan, program !== undefined && sustains(program));
-    voice.sounding = { noteId: note.noteId, trackId: note.trackId, midi: note.midi };
+    const voice = this.buildVoiceFromPlan(
+      buffer,
+      plan,
+      program !== undefined && sustains(program),
+      this.stripFor(note.trackId),
+    );
     this.voices.push(voice);
-    this.markActiveNotesDirty();
+  }
+
+  /**
+   * The track's gain-and-pan pair, built on first use.
+   *
+   * Lazily, because a plan can be loaded before there is an audio context to
+   * build nodes in — `load` does not await `initialize`.
+   */
+  private stripFor(trackId: string): RNAudioNode {
+    const existing = this.strips.get(trackId);
+    if (existing) return existing.gain;
+    const ctx = this.ctx!;
+    const gain = ctx.createGain();
+    const panner = ctx.createStereoPanner();
+    gain.connect(panner);
+    panner.connect(this.master!);
+    const strip: TrackStrip = { gain, panner };
+    this.strips.set(trackId, strip);
+    this.applyStrip(trackId, strip);
+    return gain;
+  }
+
+  /** Volume, pan, mute and solo, resolved onto one track's strip. */
+  private applyStrip(trackId: string, strip: TrackStrip): void {
+    const level = this.mix.get(trackId);
+    strip.gain.gain.value = this.audibleTrack(trackId) ? (level?.volume ?? 1) : 0;
+    strip.panner.pan.value = Math.max(-1, Math.min(1, level?.pan ?? 0));
+  }
+
+  /** Pushes the whole mix, for a fader move or a mute that must land at once. */
+  private applyAllStrips(): void {
+    for (const [trackId, strip] of this.strips) this.applyStrip(trackId, strip);
+  }
+
+  private releaseStrips(): void {
+    for (const strip of this.strips.values()) {
+      strip.gain.disconnect();
+      strip.panner.disconnect();
+    }
+    this.strips.clear();
+  }
+
+  private applyMasterGain(): void {
+    if (this.master) this.master.gain.value = this.masterVolume * this.headroom;
   }
 
   /**
@@ -409,7 +521,12 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
    * the 128 instruments never do), because a node per voice is real cost in a
    * dense passage.
    */
-  private buildVoiceFromPlan(buffer: RNAudioBuffer, plan: VoicePlan, mayLoop: boolean): Voice {
+  private buildVoiceFromPlan(
+    buffer: RNAudioBuffer,
+    plan: VoicePlan,
+    mayLoop: boolean,
+    destination: RNAudioNode = this.master!,
+  ): Voice {
     const ctx = this.ctx!;
     const source = ctx.createBufferSource();
     source.buffer = buffer;
@@ -435,7 +552,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
       source.connect(filter);
       filter.connect(amp);
     }
-    amp.connect(this.master!);
+    amp.connect(destination);
     source.start(plan.startAt);
     source.stop(plan.endAt);
 
@@ -466,16 +583,20 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     );
   }
 
+  /**
+   * Drops voices whose release has finished.
+   *
+   * Nothing about the *lit* set any more — that comes off the clock. A voice
+   * outlives its written note by the instrument's release, which is exactly
+   * the discrepancy that made deriving the lit set from here wrong.
+   */
   private reapVoices(now: number): void {
-    let changed = false;
     for (let i = this.voices.length - 1; i >= 0; i -= 1) {
       if (this.voices[i]!.endsAt <= now) {
         this.voices[i]!.gain.disconnect();
         this.voices.splice(i, 1);
-        changed = true;
       }
     }
-    if (changed) this.markActiveNotesDirty();
   }
 
   private setActiveNotes(notes: SoundingNote[]): void {
@@ -485,19 +606,6 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     if (same) return;
     this.activeNotes = notes;
     this.observer?.onActiveNotes(notes);
-  }
-
-  private markActiveNotesDirty(): void {
-    this.activeNotesDirty = true;
-  }
-
-  private flushActiveNotes(): void {
-    if (!this.activeNotesDirty) return;
-    this.activeNotesDirty = false;
-    const notes = this.voices
-      .map((v) => v.sounding)
-      .filter((n): n is SoundingNote => n !== undefined);
-    this.setActiveNotes(notes);
   }
 
   private stopAllVoices(): void {
@@ -510,13 +618,39 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
       voice.gain.disconnect();
     }
     this.voices.length = 0;
-    this.activeNotesDirty = false;
     this.setActiveNotes([]);
+    this.cancelPendingClicks();
+  }
+
+  /**
+   * Takes back clicks already placed on the graph.
+   *
+   * An oscillator started with `start(at)` sounds at that moment whatever the
+   * transport does next, and a click goes nowhere near a voice — so without
+   * this, pausing kept ticking for the length of the lookahead.
+   */
+  private cancelPendingClicks(): void {
+    if (this.pendingClicks.length === 0) return;
+    const now = this.ctx?.currentTime ?? 0;
+    for (const { osc } of this.pendingClicks) {
+      try {
+        osc.stop(now);
+      } catch {
+        // Already finished; nothing to take back.
+      }
+    }
+    this.pendingClicks.length = 0;
   }
 
   // ---- metronome ---------------------------------------------------------
 
   private scheduleClicks(horizonTick: number): void {
+    // Forget the ones that have sounded: only what is still ahead of the clock
+    // can be taken back, and a piece is minutes of beats.
+    const cutoff = this.ctx!.currentTime;
+    for (let i = this.pendingClicks.length - 1; i >= 0; i -= 1) {
+      if (this.pendingClicks[i]!.endsAt <= cutoff) this.pendingClicks.splice(i, 1);
+    }
     while (this.clickCursor < this.clicks.length && this.clicks[this.clickCursor]!.tick <= horizonTick) {
       const click = this.clicks[this.clickCursor]!;
       this.clickCursor += 1;
@@ -540,9 +674,15 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     amp.gain.setValueAtTime(accent ? 0.5 : 0.3, at);
     amp.gain.linearRampToValueAtTime(0, at + CLICK_SECONDS);
     osc.connect(amp);
-    amp.connect(this.master!);
+    // Straight to the output, past the master — the same routing the web click
+    // takes, for the same reason. A click is a monitoring aid rather than part
+    // of the music, so the headroom trim has no business making it quieter on a
+    // score with more parts. Before the trim moved onto the master this reached
+    // the same place by accident.
+    amp.connect(ctx.destination);
     osc.start(at);
     osc.stop(at + CLICK_SECONDS);
+    this.pendingClicks.push({ osc, endsAt: at + CLICK_SECONDS });
   }
 
   // ---- settings ----------------------------------------------------------
@@ -564,22 +704,29 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
   setTrackMute(trackId: string, muted: boolean): void {
     if (muted) this.muted.add(trackId);
     else this.muted.delete(trackId);
+    // Every strip, not just this one. Mute is local and solo is global, and
+    // pushing the whole mix either way means the audibility rule lives in
+    // `applyStrip` alone rather than being restated per setter.
+    this.applyAllStrips();
   }
 
   setTrackSolo(trackId: string, solo: boolean): void {
     if (solo) this.soloed.add(trackId);
     else this.soloed.delete(trackId);
+    this.applyAllStrips();
   }
 
   /**
-   * Re-reads the mix off `score`, scheduling nothing.
+   * Re-reads the mix off the tracks it is handed, scheduling nothing.
    *
-   * Mute and solo only: this engine has never carried per-track volume or pan
-   * — `muted` and `soloed` are the whole of its mix state — so there is nothing
-   * to push for the other two. That is a gap in this engine rather than
-   * something `applyMix` introduces, and it predates the method. Fixing it
-   * means giving each track its own gain node, which belongs with the device
-   * testing this engine is still waiting on.
+   * All four properties, as the interface promises. Volume and pan used to be
+   * missing here — the engine had no per-track node to put them on, so a fader
+   * moved during playback moved the fader and not the sound, exactly the bug
+   * `applyMix` exists to fix on the web side. They land on the track's strip,
+   * so they reach notes that are already sounding.
+   *
+   * A track the engine does not know is still recorded: `load` builds its strip
+   * later, reading the level from here.
    */
   applyMix(tracks: readonly PlaybackTrack[]): void {
     this.muted.clear();
@@ -587,7 +734,9 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     for (const track of tracks) {
       if (track.muted) this.muted.add(track.id);
       if (track.solo) this.soloed.add(track.id);
+      this.mix.set(track.id, { volume: track.volume, pan: track.pan });
     }
+    this.applyAllStrips();
   }
 
   setMetronome(enabled: boolean): void {
@@ -596,7 +745,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
 
   setMasterVolume(volume: number): void {
     this.masterVolume = Math.min(1, Math.max(0, volume));
-    if (this.master) this.master.gain.value = this.masterVolume;
+    this.applyMasterGain();
   }
 
   // ---- audition ----------------------------------------------------------
@@ -627,7 +776,10 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
     const now = this.ctx!.currentTime;
     // Held until noteOff: released far enough out that an ordinary key press
     // ends it first, and bounded so a lost noteOff cannot ring forever.
-    const voice = this.buildVoice(buffer, choice.detuneCents, this.masterVolume, now, now + 30);
+    // Unity, not `masterVolume`: this connects to the master, which already
+    // carries it. Passing it here again played every audition at the square of
+    // the fader — a quarter of the level at half volume.
+    const voice = this.buildVoice(buffer, choice.detuneCents, 1, now, now + 30);
     this.auditioned.set(midi, voice);
   }
 
@@ -656,6 +808,7 @@ export class RNSamplePlaybackEngine implements PlaybackEngine {
   dispose(): void {
     this.haltPump();
     this.stopAllVoices();
+    this.releaseStrips();
     for (const voice of this.auditioned.values()) voice.gain.disconnect();
     this.auditioned.clear();
     this.master?.disconnect();

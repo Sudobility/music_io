@@ -31,6 +31,7 @@ import { PlaybackClock } from './clock.js';
 import { NoteQueue } from '../../shared/playback/note-queue.js';
 import { SoundingSet } from '../../shared/playback/sounding-set.js';
 import { scheduleClick } from './click.js';
+import type { ScheduledClick } from './click.js';
 import { Governor } from './governor.js';
 import { loadSoundfont, openSoundfontCache } from './soundfont-loader.js';
 import type { LoadProgress } from './soundfont-loader.js';
@@ -188,6 +189,15 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
   /** Click positions in ticks, with a cursor, mirroring how notes are drained. */
   private clicks: readonly MetronomeClick[] = [];
   private clickCursor = 0;
+  /**
+   * Clicks already placed on the audio graph, so the transport can take them
+   * back.
+   *
+   * They are scheduled a whole horizon ahead and do not go through the synth,
+   * so `allSoundOff` says nothing to them: pausing used to leave the room
+   * ticking for four seconds after the music stopped.
+   */
+  private pendingClicks: ScheduledClick[] = [];
   /** Audition voices are held on their own channel so they never disturb a track. */
   private auditionHeld = new Map<number, ChannelAssignment>();
   /** How many synths the current score's channel assignment needs. */
@@ -477,6 +487,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.clock.stop();
     this.endPump();
     this.deps.host.allSoundOff();
+    this.cancelPendingClicks();
     this.clearSounding(0);
     this.queue.seekToTick(0);
     this.clickCursor = 0;
@@ -491,6 +502,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.clickCursor = this.clicks.findIndex((c) => c.tick >= tick);
     if (this.clickCursor < 0) this.clickCursor = this.clicks.length;
     this.deps.host.allSoundOff();
+    this.cancelPendingClicks();
     this.clearSounding(seconds);
 
     // Report where we landed. Nothing else writes the store's position —
@@ -507,9 +519,23 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.report(seconds);
   }
 
+  /**
+   * Changes playback speed, rebuilding what is already queued.
+   *
+   * Every note in the sequencer carries a delay worked out at the speed that
+   * was in force when it was posted, and the horizon is four seconds deep — so
+   * on its own a speed change moved the caret at once and left the music at the
+   * old tempo for a whole horizon, then jumped. Re-seeking where we stand drops
+   * that backlog, and the next tick refills it at the new speed. The gap is one
+   * pump interval.
+   */
   setTempoMultiplier(multiplier: number): void {
+    if (multiplier === this.tempoMultiplier) return;
     this.tempoMultiplier = multiplier;
+    // Banks the position first, so the seek below reads where we actually are
+    // rather than a position rescaled retroactively.
     this.clock.setRate(multiplier);
+    if (this.stopPump) this.seek(this.tickForSeconds(this.clock.positionSeconds));
   }
 
   setLoop(range: ScoreRange | null): void {
@@ -562,6 +588,9 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
 
   setMetronome(enabled: boolean): void {
     this.metronomeEnabled = enabled;
+    // Switching it off has to reach the horizon that is already queued, or the
+    // click carries on for four seconds after the user silenced it.
+    if (!enabled) this.cancelPendingClicks();
   }
 
   setMasterVolume(volume: number): void {
@@ -603,6 +632,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
 
   dispose(): void {
     this.endPump();
+    this.cancelPendingClicks();
     this.deps.host.dispose();
     this.context?.close?.();
     this.context = null;
@@ -651,8 +681,8 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.applyLoop(position);
 
     const speed = this.playbackSpeed;
-    const untilSeconds = position + HORIZON_SECONDS * speed;
-    const due = this.queue.drainUntil(this.tickForSeconds(untilSeconds), MAX_EVENTS_PER_REFILL);
+    const untilTick = this.horizonTick(position + HORIZON_SECONDS * speed);
+    const due = this.queue.drainUntil(untilTick, MAX_EVENTS_PER_REFILL);
 
     for (const note of due) {
       const state = this.tracks.get(note.trackId);
@@ -664,7 +694,7 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
         instance,
         channel,
         note.midi,
-        note.velocity,
+        clampVelocity(note.velocity),
         // Clamped to zero in `noteAt`: a note whose moment passed during a
         // stall sounds at once rather than being dropped, because the sequencer
         // still holds its release.
@@ -673,9 +703,33 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
       );
     }
 
-    this.pumpMetronome(position, untilSeconds);
+    this.pumpMetronome(position, untilTick);
     this.report(position);
-    if (this.queue.exhausted && this.clock.isRunning && position >= this.lastNoteEndSeconds) this.stop();
+    // A loop never ends the transport: its range may well run past the last
+    // note, and stopping there would end playback mid-loop.
+    if (
+      !this.loopRange &&
+      this.queue.exhausted &&
+      this.clock.isRunning &&
+      position >= this.lastNoteEndSeconds
+    ) {
+      this.stop();
+    }
+  }
+
+  /**
+   * The far edge of what this tick may schedule, in ticks.
+   *
+   * Clamped to just inside a loop, because the wrap only happens on the pump
+   * tick *after* the end is reached: without this a note or click a few
+   * milliseconds past the loop end was already in the sequencer and sounded
+   * before the loop came round, on every pass. The end tick itself belongs to
+   * the next pass, where it is the loop's own first beat.
+   */
+  private horizonTick(untilSeconds: number): number {
+    const tick = this.tickForSeconds(untilSeconds);
+    if (!this.loopRange) return tick;
+    return Math.min(tick, this.loopRange.endTick - 1);
   }
 
   /**
@@ -700,21 +754,37 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
    * `start(at)` sounds at that sample however busy the main thread is, so the
    * click stays steady even when the pump runs late.
    */
-  private pumpMetronome(position: number, untilSeconds: number): void {
+  private pumpMetronome(position: number, untilTick: number): void {
+    const now = this.now();
+    // Forget the ones that have finished sounding, so the list tracks what is
+    // still cancellable rather than growing for the length of the piece.
+    if (this.pendingClicks.length > 0) {
+      this.pendingClicks = this.pendingClicks.filter((click) => click.endsAt > now);
+    }
     if (!this.metronomeEnabled || !this.context) return;
     while (this.clickCursor < this.clicks.length) {
       const click = this.clicks[this.clickCursor];
+      if (click.tick > untilTick) break;
       const atSeconds = this.secondsForTick(click.tick);
-      if (atSeconds > untilSeconds) break;
       this.clickCursor += 1;
       if (atSeconds < position) continue; // already gone by; do not stack it up
-      scheduleClick(
-        this.context,
-        this.context.destination,
-        this.now() + Math.max(0, (atSeconds - position) / this.playbackSpeed),
-        click.accent,
+      this.pendingClicks.push(
+        scheduleClick(
+          this.context,
+          this.context.destination,
+          now + Math.max(0, (atSeconds - position) / this.playbackSpeed),
+          click.accent,
+        ),
       );
     }
+  }
+
+  /** Takes back every click still queued — a stop, a seek, or the switch going off. */
+  private cancelPendingClicks(): void {
+    if (this.pendingClicks.length === 0) return;
+    const at = this.now();
+    for (const click of this.pendingClicks) click.cancel(at);
+    this.pendingClicks = [];
   }
 
   /** Inverse of `secondsForTick`, for turning the lookahead window back into ticks. */
@@ -757,6 +827,18 @@ export class SoundfontPlaybackEngine implements PlaybackEngine {
     this.sounding.reset(atSeconds);
     if (had) this.observer?.onActiveNotes([]);
   }
+}
+
+/**
+ * A note velocity as MIDI will take it.
+ *
+ * The floor is 1, not 0: a note-on at velocity zero *is* a note-off, so a value
+ * that rounds to nothing is a note that silently does not sound. The offline
+ * renderer has always clamped this way, and an export that sounds a note
+ * playback drops is the drift `shared/` exists to prevent.
+ */
+function clampVelocity(velocity: number): number {
+  return Math.max(1, Math.min(MAX_CC, Math.round(velocity)));
 }
 
 function panToCc(pan: number): number {

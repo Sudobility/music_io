@@ -78,6 +78,7 @@ export type RNAudioContext = {
   createGain(): RNGainNode;
   createBufferSource(): RNBufferSource;
   createOscillator(): RNOscillator;
+  createStereoPanner(): RNStereoPanner;
   createBiquadFilter(): RNBiquadFilter;
   resume(): Promise<void>;
   close(): Promise<void> | void;

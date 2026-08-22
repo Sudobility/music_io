@@ -19,6 +19,7 @@
  */
 import type { DecodedAudio, RenderPlan } from '@sudobility/music_types';
 import { allocateChannels } from '../playback/channel-allocator.js';
+import { headroomTrimFor, limitPeaks } from '../../shared/playback/mix.js';
 import type { ChannelAssignment } from '../playback/channel-allocator.js';
 import { getOfflineSynth } from './offline-synth.js';
 import type { LoadedOfflineSynth } from './offline-synth.js';
@@ -69,6 +70,14 @@ export function createSoundfontRenderer(
       plan.tracks.map((t) => ({ id: t.id, isPercussion: t.isPercussion })),
     );
 
+    // The same trim `SynthHost` puts on the live master bus, for the same
+    // reason: every channel is scheduled at its own MIDI volume with nothing
+    // reconciling them, so the sum grows with the part count. Without it the
+    // export was `sqrt(n)` louder than what was heard and the encoders — which
+    // hard-clamp — turned that into clipping across most of a large score.
+    // Sized by how many tracks *exist*, matching `setTrackCount(tracks.length)`.
+    const headroom = headroomTrimFor(plan.tracks.length);
+
     const samples = new Float32Array(totalFrames);
     // One synth, so an allocation that spans several of them is rendered as
     // several passes summed into the same buffer. Ignoring the instance and
@@ -82,6 +91,11 @@ export function createSoundfontRenderer(
     }
 
     synth.midiAllSoundsOff();
+    // Last in the chain, exactly as the limiter sits after the master gain on
+    // the live bus. The trim sizes the mix for its average level; this catches
+    // the phase-aligned moments it cannot predict, which would otherwise reach
+    // the encoders and be clamped.
+    limitPeaks(samples, sampleRate);
     return { samples, sampleRate };
 
     /** Configures this instance's channels, then sums its audio into `samples`. */
@@ -152,7 +166,9 @@ export function createSoundfontRenderer(
         // otherwise vanish from the export while being audible in playback.
         // Summed rather than assigned, so a second pass adds to the first.
         const count = Math.min(BLOCK_FRAMES, totalFrames - frame);
-        for (let i = 0; i < count; i += 1) samples[frame + i] += (left[i] + right[i]) * 0.5;
+        for (let i = 0; i < count; i += 1) {
+          samples[frame + i] += (left[i] + right[i]) * 0.5 * headroom;
+        }
       }
     }
   };

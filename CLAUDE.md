@@ -98,7 +98,7 @@ on both platforms.
   expressive variation, not the instrument's identity. The engine that was
   deleted synthesised oscillator approximations, which is a different and much
   worse thing. See `spikes/rn-sample-playback.md`.
-- **`applyMix(score)` exists because mute and solo had setters and volume and pan did not.** A track's volume was read once at `loadScore` and pan only in `applyScoreToHost`, so once `music_lib`'s edit lock made a mix change stop reloading the score, moving a fader mid-playback moved the fader and not the sound. The web engine pushes CC7 and CC10 from the score and schedules nothing. **The RN sample engine syncs mute and solo only** — it has never carried per-track volume or pan; `muted` and `soloed` are its whole mix state. That gap predates the method, and closing it means a gain node per track, which belongs with the device testing that engine is still waiting on.
+- **`applyMix(score)` exists because mute and solo had setters and volume and pan did not.** A track's volume was read once at `loadScore` and pan only in `applyScoreToHost`, so once `music_lib`'s edit lock made a mix change stop reloading the score, moving a fader mid-playback moved the fader and not the sound. The web engine pushes CC7 and CC10 from the score and schedules nothing. **The RN engine reaches the same place with a node instead of a control change:** one gain-and-panner strip per track, built on first use, with voices connecting to their track's strip rather than to the master. Per-track rather than per-voice — the offline renderer builds a panner per voice because it schedules once and never changes its mind, where a live fader has to move under notes that are already sounding. That also settles where the headroom trim lives on RN: on the master, as it is on web, not multiplied into every voice's gain. **The metronome click bypasses the master on both platforms** so a score with more parts does not get a quieter click.
 - **The DSM reader's offsets were measured against a real file, not read from a specification — and two of them contradict the usual documentation.** `numOrders` sits at `SONG+36`, where `+34` is `restartPos` and yields 127 instead of 31; the `INST` name sits at `+36` of a 64-byte header. Both were pinned by arithmetic that has to close: the order list's maximum equals `numPatterns - 1`, and `64 + length` equals the chunk length for every instrument. A real module lives in `src/shared/tracker/fixtures/` so those offsets stay honest. **`NOTE_BASE` is the one value still unconfirmed** — the file carries no reference pitch and no note-off, so it fixes note *spacing* but not the absolute octave. It currently produces E3-B5 for that module, which is plausible but not proof; an octave error would move every note together and pass every test here.
 - **DSM shares ProTracker's effect lettering**, which is why `protracker-effects.ts` is shared with the MOD reader rather than written twice. Verified on the real file: effect `0x0F` with parameters 5 and 114, splitting at `0x20` exactly as MOD does. S3M, XM and IT letter theirs differently and will bring their own normalisers.
 - **S3M is parapointer-addressed, so nothing is read by walking forward.** The header carries tables of 16-bit pointers which, times sixteen, give file offsets for each instrument and pattern. It has **its own effect normaliser** (`s3m-effects.ts`) because commands are numbered 1=A..26=Z rather than nibbled: `A` sets speed, `T` sets tempo, `C` breaks the pattern, and there is none of MOD's `0x20` split to make.
@@ -150,11 +150,63 @@ on both platforms.
   200ms window plus 200ms grace meant a stall over ~400ms silently lost every
   note inside it, and a 200-track notation redraw measures 119ms. Do not
   reintroduce a skip rule without re-reading that.
+- **A four-second horizon means anything that changes the future has to take
+  the future back.** The three that do are `seek`/`stop` (already), a playback
+  **speed** change and the **loop** wrap. A speed change re-anchors the caret
+  instantly while every queued note still carries a delay computed at the old
+  speed, so without a re-seek the music kept the previous tempo for a whole
+  horizon and then jumped; `setTempoMultiplier` therefore re-seeks where it
+  stands when the pump is running, costing one 50ms gap. A loop wrap only
+  happens on the pump tick *after* the end is reached, so `horizonTick` clamps
+  the drain to `endTick - 1` — otherwise notes just past the end were already in
+  the sequencer and sounded before the loop came round, every pass. For the same
+  reason a loop never lets the transport stop: its range may run past the last
+  note. **Metronome clicks are the case that bites**, because they are real
+  oscillators on the graph and `allSoundOff` speaks only to the synth — a
+  scheduled click is unreachable from there. `scheduleClick` hands back a
+  `cancel`, the engine holds what is pending, and stop, seek, dispose and
+  switching the metronome off all take it back. Before that, pausing left the
+  room ticking for four seconds.
+- **`headroomTrimFor` is in `shared/playback/mix.ts` so playback and export
+  cannot disagree, and for a while the web export simply did not call it.**
+  Every channel is scheduled at its own MIDI volume with nothing reconciling
+  them, so a rendered file came out `sqrt(n)` louder than what was heard and
+  the wav/mp3 encoders — which hard-clamp — turned that into clipping across
+  most of a large score. The RN renderer always applied it. `mix.ts`'s doc now
+  names all four call sites, so a fifth is noticed by its absence.
+- **The export limiter is not the live one, and works backwards.** `limitPeaks`
+  is the offline half of the master bus, after the trim exactly as
+  `DynamicsCompressorNode` sits after the master gain live — the trim sizes the
+  mix for its *average* level and the phase-aligned moments still overshoot,
+  which in an export means the encoders' clamp rather than a sound card. It does
+  **not** reimplement that node: its knee, ratio and program-dependent behaviour
+  are not specified closely enough to reproduce, and the job — nothing leaves
+  above the ceiling, by ducking rather than clipping — is what is reproduced.
+  The gain envelope is computed **backwards** (each sample's gain is the lower
+  of what it needs and what the next allows plus one attack step) so the ramp is
+  finished when the peak lands, and so the ceiling is *exact*: a forward
+  one-pole never quite arrives, and clamping the residue is the clipping this
+  replaces. The forward pass is the release, and it is what stops a loud
+  sustained passage pumping once per cycle. RN's renderers have no limiter at
+  all, matching RN playback, which also has none.
+- **A note-on at velocity 0 is a note-off.** The offline renderer always clamped
+  to 1..127; the live engine passed `PlaybackNote.velocity` through untouched,
+  so a plan carrying a fractional or zero velocity produced a note that silently
+  did not sound in playback and did sound in the export. `clampVelocity` in
+  `soundfont-engine.ts` closes that. Note the unit trap either side of it:
+  `PlaybackNote.velocity` is MIDI 0-127 and `RenderEvent.velocity` is 0..1.
 - **`onActiveNotes` fires only on change** (`shared/playback/sounding-set.ts`).
   It used to be a fresh array every pump tick whether or not a note had begun or
   ended, waking notation colour and the keyboard's key lights twenty times a
   second through a held chord. Anything that starts re-sending it per tick has
   undone the reason that module exists.
+- **The lit set comes off the clock, never off the voices — on both engines
+  now.** RN used to derive it from its scheduled voices, which are built a
+  lookahead ahead of the clock and torn down only after the instrument's
+  release: notation lit every note 200ms early and stayed lit through a half
+  second of decay after the written note was over. `SoundingSet` answers "what
+  is sounding *now*", which is the question notation is asking; a voice list
+  answers "what has been arranged for", which is a different one.
 - **The RN engine deliberately does not reuse the web engine's pump.** Merging
   the two transports behind a synth port is the obvious refactor and the wrong
   order: the web engine is verified on real devices and the RN one cannot be

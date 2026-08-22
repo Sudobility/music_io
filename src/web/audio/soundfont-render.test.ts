@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RenderPlan } from '@sudobility/music_types';
+import { LIMITER_CEILING_DB } from '../../shared/playback/mix.js';
 import { createSoundfontRenderer } from './soundfont-render.js';
 import type { LoadedOfflineSynth } from './offline-synth.js';
 import type { SynthesizerLike } from './synth-types.js';
@@ -81,6 +82,26 @@ describe('createSoundfontRenderer', () => {
     // audible in playback and silent in the export.
     const audio = await rendererFor(stubSynth({ left: 0, right: 1 }))(plan());
     expect(audio.samples[0]).toBeCloseTo(0.5, 6);
+  });
+
+  it('trims the master by the same headroom playback applies', async () => {
+    // `SynthHost` puts `headroomTrimFor(trackCount)` on the master bus, so a
+    // nine-track arrangement plays back at a third of what its channels sum
+    // to. The renderer summed them raw, which the encoders then hard-clamp —
+    // an export that clipped through most of a piece playback handled fine.
+    const tracks = ['t1', 't2', 't3', 't4'].map((id) => track({ id }));
+    const audio = await rendererFor(stubSynth())(plan({ tracks, events: [] }));
+    expect(audio.samples[0]).toBeCloseTo(0.5, 6); // 1.0 summed, times 1/sqrt(4)
+  });
+
+  it('holds the export under the limiter ceiling instead of clipping it', async () => {
+    // A single track at full scale clears the headroom trim untouched and would
+    // reach the encoders at 1.0, where they hard-clamp. Playback has a limiter
+    // after its master gain for exactly this; so does the render now.
+    const audio = await rendererFor(stubSynth({ left: 1, right: 1 }))(plan());
+    let peak = 0;
+    for (const sample of audio.samples) peak = Math.max(peak, Math.abs(sample));
+    expect(peak).toBeLessThanOrEqual(10 ** (LIMITER_CEILING_DB / 20) * (1 + 1e-6));
   });
 
   it('selects the drum kit, never a melodic program, on channel 9', async () => {

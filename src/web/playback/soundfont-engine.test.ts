@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PlaybackLoadState, PlaybackPlan } from '@sudobility/music_types';
 import { SoundfontPlaybackEngine } from './soundfont-engine.js';
-import { testPlan, twoTrackPlan } from '../../shared/playback/test-plan.js';
+import { testNote, testPlan, testTrack, twoTrackPlan } from '../../shared/playback/test-plan.js';
 
 /** Records everything the engine tells the synth host. */
 function stubHost() {
@@ -34,24 +34,48 @@ function stubHost() {
   };
 }
 
+/** One scheduled metronome click, as the fake graph saw it. */
+type ClickRecord = { startAt: number; stopAt: number };
+
 /** Enough AudioContext for the metronome click, and nothing more. */
 function stubContext() {
-  const param = () => ({ value: 0, setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() });
+  const param = () => ({
+    value: 0,
+    setValueAtTime: vi.fn(),
+    exponentialRampToValueAtTime: vi.fn(),
+    cancelScheduledValues: vi.fn(),
+  });
+  const clicks: ClickRecord[] = [];
   return {
     sampleRate: 44100,
     currentTime: 0,
+    clicks,
     destination: { connect: vi.fn(), disconnect: vi.fn() },
     close: vi.fn(),
-    createOscillator: vi.fn(() => ({
-      frequency: { value: 0 },
-      connect: vi.fn(),
-      disconnect: vi.fn(),
-      start: vi.fn(),
-      stop: vi.fn(),
-      onended: null,
-    })),
+    createOscillator: vi.fn(() => {
+      const record: ClickRecord = { startAt: 0, stopAt: 0 };
+      clicks.push(record);
+      return {
+        frequency: { value: 0 },
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        start: vi.fn((at: number) => {
+          record.startAt = at;
+        }),
+        // Last call wins, exactly as Web Audio treats a re-stop.
+        stop: vi.fn((at: number) => {
+          record.stopAt = at;
+        }),
+        onended: null,
+      };
+    }),
     createGain: vi.fn(() => ({ gain: param(), connect: vi.fn(), disconnect: vi.fn() })),
-  } as unknown as AudioContext;
+  } as unknown as AudioContext & { clicks: ClickRecord[] };
+}
+
+/** The fake graph behind a running engine, for asserting on scheduled clicks. */
+function graphOf(engine: SoundfontPlaybackEngine): { clicks: ClickRecord[] } {
+  return (engine as unknown as { context: { clicks: ClickRecord[] } }).context;
 }
 
 /** A pump we step by hand, so tests never wait on real time. */
@@ -823,5 +847,141 @@ describe('SoundfontPlaybackEngine: applyMix', () => {
     host.noteAt.mockClear();
     engine.applyMix(plan.tracks);
     expect(host.noteAt).not.toHaveBeenCalled();
+  });
+});
+
+describe('SoundfontPlaybackEngine: the metronome', () => {
+  it('takes back the clicks it has already scheduled when the transport stops', async () => {
+    // Clicks are placed on the audio graph up to a whole horizon ahead, where
+    // an oscillator started with `start(at)` sounds at that sample whatever
+    // the transport does afterwards. Nothing in `allSoundOff` reaches them —
+    // that speaks to the synth — so pausing left the room ticking for four
+    // seconds after the music stopped.
+    const { engine, pump, clock, plan } = setup();
+    await engine.initialize();
+    await engine.load(plan);
+    engine.setMetronome(true);
+    await engine.play();
+    pump.step();
+
+    const { clicks } = graphOf(engine);
+    const pending = clicks.filter((c) => c.startAt > 0.5);
+    expect(pending.length).toBeGreaterThan(0);
+
+    clock.t = 0.5;
+    engine.pause();
+    // Stopped at or before the moment it would have begun, so it never sounds.
+    for (const click of pending) expect(click.stopAt).toBeLessThanOrEqual(click.startAt);
+  });
+
+  it('stops clicking within a beat of being switched off, not a horizon later', async () => {
+    const { engine, pump, clock, plan } = setup();
+    await engine.initialize();
+    await engine.load(plan);
+    engine.setMetronome(true);
+    await engine.play();
+    pump.step();
+
+    clock.t = 0.5;
+    engine.setMetronome(false);
+    const pending = graphOf(engine).clicks.filter((c) => c.startAt > 0.5);
+    for (const click of pending) expect(click.stopAt).toBeLessThanOrEqual(click.startAt);
+  });
+});
+
+describe('SoundfontPlaybackEngine: looping', () => {
+  const loop = (startTick: number, endTick: number) => ({ startTick, endTick, trackIds: [] });
+
+  it('schedules nothing past the loop end', async () => {
+    // The horizon is four seconds and the wrap only happens on the pump tick
+    // *after* the end is reached, so a note a few milliseconds past the loop
+    // end was already in the sequencer and sounded before the loop came round.
+    const { engine, host, pump, plan } = setup();
+    await engine.initialize();
+    await engine.load(plan);
+    engine.setLoop(loop(0, 1920)); // two seconds at 960 ticks per second
+    await engine.play();
+    pump.step();
+
+    expect(host.noteAt.mock.calls.map((call) => call[2])).toEqual([60, 61, 62, 63]);
+  });
+
+  it('does not click past the loop end either', async () => {
+    const { engine, pump, plan } = setup();
+    await engine.initialize();
+    await engine.load(plan);
+    engine.setMetronome(true);
+    engine.setLoop(loop(0, 1920));
+    await engine.play();
+    pump.step();
+
+    // Ticks 0, 480, 960, 1440 — the click at 1920 belongs to the next pass,
+    // where it is the downbeat of the loop's first beat.
+    expect(graphOf(engine).clicks.map((c) => c.startAt)).toEqual([0, 0.5, 1, 1.5]);
+  });
+
+  it('keeps looping past the last note rather than stopping the transport', async () => {
+    const states: string[] = [];
+    const { engine, pump, clock, plan } = setup();
+    engine.setObserver({
+      onPositionTick: () => {},
+      onActiveNotes: () => {},
+      onStateChange: (state) => states.push(state),
+    });
+    await engine.initialize();
+    await engine.load(plan);
+    engine.setLoop(loop(0, 480 * 20)); // past the eight seconds of music
+    await engine.play();
+
+    clock.t = 9; // every note drained and finished
+    pump.step();
+    expect(states).not.toContain('stopped');
+  });
+});
+
+describe('SoundfontPlaybackEngine: playback speed', () => {
+  it('rebuilds the horizon when the speed changes mid-playback', async () => {
+    // Everything already in the sequencer carries a delay computed at the old
+    // speed. Four seconds of it, so without a rebuild the music keeps the
+    // previous tempo for a whole horizon and then jumps.
+    const { engine, host, pump, clock, plan } = setup();
+    await engine.initialize();
+    await engine.load(plan);
+    await engine.play();
+    pump.step();
+
+    clock.t = 0.5;
+    host.noteAt.mockClear();
+    engine.setTempoMultiplier(2);
+    pump.step();
+
+    // Tick 960 falls one score-second in; half of that has played, so half a
+    // score-second remains — a quarter of a second at double speed.
+    const call = host.noteAt.mock.calls.find((c) => c[2] === 62);
+    expect(call?.[4]).toBeCloseTo(0.25, 6);
+  });
+});
+
+describe('SoundfontPlaybackEngine: note velocity', () => {
+  it('clamps and rounds velocity, as the offline renderer does', async () => {
+    // A note-on at velocity zero is a note-off in MIDI, so a value that rounds
+    // to nothing is a note that silently does not sound — while the same plan
+    // exported through `soundfont-render`, which already clamps, would sound
+    // it. The two must not disagree about what is audible.
+    const plan = testPlan({
+      tracks: [testTrack({ id: 't0' })],
+      notes: [
+        testNote({ trackId: 't0', tick: 0, velocity: 0.4, noteId: 'a' }),
+        testNote({ trackId: 't0', tick: 480, velocity: 200, noteId: 'b' }),
+        testNote({ trackId: 't0', tick: 960, velocity: 80.6, noteId: 'c' }),
+      ],
+    });
+    const { engine, host, pump } = setup(plan);
+    await engine.initialize();
+    await engine.load(plan);
+    await engine.play();
+    pump.step();
+
+    expect(host.noteAt.mock.calls.map((call) => call[3])).toEqual([1, 127, 81]);
   });
 });

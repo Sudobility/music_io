@@ -19,9 +19,17 @@ class FakeGraph {
   currentTime = 0;
   readonly sources: StartedSource[] = [];
   readonly oscillators: Array<{ hz: number; startAt: number }> = [];
+  /** Every gain node built, so a test can read the master's and each track's level. */
+  readonly gains: Array<{ gain: { value: number }; readonly _assigned: number | null }> = [];
+  readonly panners: Array<{ pan: { value: number } }> = [];
   closed = false;
 
   readonly api: AudioApi;
+
+  /** The levels actually set as a mix — the master's and each track's. */
+  get levels(): number[] {
+    return this.gains.map((g) => g._assigned).filter((v): v is number => v !== null);
+  }
 
   constructor() {
     // Captured explicitly rather than through `this`: the fake context reads a
@@ -32,6 +40,8 @@ class FakeGraph {
     const graph = {
       sources: this.sources,
       oscillators: this.oscillators,
+      gains: this.gains,
+      panners: this.panners,
       getTime: () => this.currentTime,
       close: () => {
         this.closed = true;
@@ -59,16 +69,40 @@ class FakeGraph {
       destination: { connect: () => undefined, disconnect: () => undefined },
       createGain() {
         let peak = 0;
-        return {
-          gain: param((v) => {
-            if (peak === 0) peak = v;
-          }),
+        // A voice's amp is driven entirely by `setValueAtTime`; a master or
+        // track level is assigned to `.value` directly. Recording which of the
+        // two happened is what lets a test address the mix without counting
+        // nodes.
+        let assigned: number | null = null;
+        const scheduled = param((v) => {
+          if (peak === 0) peak = v;
+        });
+        const node = {
+          gain: {
+            ...scheduled,
+            get value() {
+              return assigned ?? 0;
+            },
+            set value(v: number) {
+              assigned = v;
+            },
+          },
           get _peak() {
             return peak;
+          },
+          get _assigned() {
+            return assigned;
           },
           connect: () => undefined,
           disconnect: () => undefined,
         };
+        graph.gains.push(node);
+        return node;
+      },
+      createStereoPanner() {
+        const node = { pan: param(), connect: () => undefined, disconnect: () => undefined };
+        graph.panners.push(node);
+        return node;
       },
       createBufferSource() {
         const record: StartedSource = {
@@ -273,6 +307,14 @@ function twoTrackPlan() {
 }
 
 /** The same, with the bass line turned into a TR-808 drum part. */
+/** One piano note, for the lit-note and mix assertions. */
+function oneNotePlan(tick: number, durTicks: number) {
+  return testPlan({
+    tracks: [testTrack({ id: 'lead', voiceProgram: 0, voiceName: 'Acoustic Grand Piano' })],
+    notes: [testNote({ trackId: 'lead', tick, durTicks, midi: 60, noteId: 'n0' })],
+  });
+}
+
 function planWithDrums() {
   const base = twoTrackPlan();
   const drumTrack = 'bass';
@@ -442,6 +484,89 @@ describe('RNSamplePlaybackEngine', () => {
     expect(activeNotes[0]!.length).toBeGreaterThan(1);
   });
 
+  it('lights a note when it sounds, not when it is scheduled', async () => {
+    // Voices are built a lookahead ahead of the clock, so deriving the lit set
+    // from them highlighted every note 200ms early and held it through the
+    // release tail. The web engine reads the clock instead; so does this now.
+    const { observer, activeNotes } = recordingObserver();
+    ctx.engine.setObserver(observer);
+    await ctx.engine.load(oneNotePlan(96, 480));
+    await ctx.engine.play();
+    ctx.step();
+
+    expect(ctx.graph.sources).toHaveLength(1); // scheduled inside the lookahead
+    expect(activeNotes.at(-1) ?? []).toEqual([]); // but a tenth of a second away
+
+    ctx.graph.currentTime = 0.15;
+    ctx.step();
+    expect((activeNotes.at(-1) ?? []).map((n) => n.noteId)).toEqual(['n0']);
+  });
+
+  it('stops lighting a note at its written end, not after its release tail', async () => {
+    const { observer, activeNotes } = recordingObserver();
+    ctx.engine.setObserver(observer);
+    await ctx.engine.load(oneNotePlan(0, 480)); // half a second at 960 ticks a second
+    await ctx.engine.play();
+    ctx.step();
+    expect((activeNotes.at(-1) ?? []).map((n) => n.noteId)).toEqual(['n0']);
+
+    // Still audible — the piano's measured release runs on past here — but the
+    // written note is over and the notation should not still be coloured.
+    ctx.graph.currentTime = 0.55;
+    ctx.step();
+    expect(activeNotes.at(-1) ?? []).toEqual([]);
+  });
+
+  it('carries per-track volume and pan, not just mute and solo', async () => {
+    const plan = testPlan({
+      tracks: [
+        testTrack({
+          id: 'lead',
+          voiceProgram: 0,
+          voiceName: 'Acoustic Grand Piano',
+          volume: 0.5,
+          pan: -1,
+        }),
+      ],
+      notes: [testNote({ trackId: 'lead', tick: 0, midi: 60, noteId: 'n0' })],
+    });
+    await ctx.engine.load(plan);
+    await ctx.engine.play();
+    ctx.step();
+
+    expect(ctx.graph.levels).toContain(0.5);
+    expect(ctx.graph.panners.map((p) => p.pan.value)).toContain(-1);
+  });
+
+  it('moves a fader during playback without reloading the score', async () => {
+    const plan = testPlan({
+      tracks: [testTrack({ id: 'lead', voiceProgram: 0, voiceName: 'Acoustic Grand Piano' })],
+      notes: [testNote({ trackId: 'lead', tick: 0, midi: 60, noteId: 'n0' })],
+    });
+    await ctx.engine.load(plan);
+    await ctx.engine.play();
+    ctx.step();
+
+    ctx.engine.applyMix([{ ...plan.tracks[0]!, volume: 0.25, pan: 1 }]);
+    expect(ctx.graph.levels).toContain(0.25);
+    expect(ctx.graph.panners.map((p) => p.pan.value)).toContain(1);
+  });
+
+  it('silences a note already sounding when its track is muted', async () => {
+    // Mute used to gate scheduling only, so a note that had already started
+    // played on to its end after the user muted it.
+    const plan = testPlan({
+      tracks: [testTrack({ id: 'lead', voiceProgram: 0, voiceName: 'Acoustic Grand Piano' })],
+      notes: [testNote({ trackId: 'lead', tick: 0, durTicks: 1920, midi: 60, noteId: 'n0' })],
+    });
+    await ctx.engine.load(plan);
+    await ctx.engine.play();
+    ctx.step();
+
+    ctx.engine.setTrackMute('lead', true);
+    expect(ctx.graph.levels).toContain(0);
+  });
+
   it('reports position while playing', async () => {
     const { observer, ticks } = recordingObserver();
     ctx.engine.setObserver(observer);
@@ -519,6 +644,27 @@ describe('RNSamplePlaybackEngine', () => {
 
     await expect(failing.engine.play()).rejects.toThrow(/not a MIDI\.js sample pack/i);
     expect(loads[loads.length - 1]).toMatchObject({ status: 'failed' });
+  });
+
+  it('picks a loop up where the last pass ended, not a whole loop later', async () => {
+    // The wrap re-anchors the clock on the moment the loop end was reached.
+    // Reading that moment *after* `seek` has already re-anchored on now
+    // answers "when would the end come round if the loop started this
+    // instant" — one full loop late — so the engine went silent until real
+    // time caught up with its own answer.
+    const { engine, graph, step } = ctx;
+    await engine.load(twoTrackPlan());
+    engine.setLoop({ startTick: 0, endTick: 960, trackIds: [] });
+    await engine.play();
+    step();
+
+    graph.currentTime = 0.9; // inside the lookahead of the one-second loop end
+    step();
+    graph.sources.length = 0;
+
+    graph.currentTime = 1.05; // the second pass has begun
+    step();
+    expect(graph.sources.length).toBeGreaterThan(0);
   });
 
   it('closes the audio context on dispose', async () => {

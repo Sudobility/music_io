@@ -46,7 +46,10 @@ export function testNote(over: Partial<PlaybackNote> & { trackId: string }): Pla
     tick: 0,
     durTicks: 480,
     midi: 60,
-    velocity: 0.8,
+    // MIDI's 0-127, which is the unit `PlaybackNote` carries — `RenderPlan` is
+    // the one that uses 0..1. This read 0.8 for a while, which both engines
+    // treat as the quietest note there is.
+    velocity: 96,
     noteId: `n-${over.tick ?? 0}-${over.trackId}`,
     ...over,
   };
