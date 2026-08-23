@@ -6,15 +6,13 @@
 import { createUnsupportedMidiInput } from '../shared/midi/unsupported-midi-input.js';
 import { RNXmlParser } from './xml/xml.rn.js';
 import { RNFileExporter } from './file/file.rn.js';
-import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
-import { SharedTrackerCodec } from '../shared/mod/codec.js';
 import { createRNAudioCodec } from './audio-codec.js';
 import { RNSamplePlaybackEngine } from './playback/sample-engine.js';
 import { createRNSoundfontRenderer } from './audio/offline-render.js';
 import type { SampleEngineDeps } from './playback/sample-engine.js';
 import type { MusicIo } from '../shared/types.js';
 
-export { RNXmlParser, RNFileExporter, ToneJsMidiCodec, RNSamplePlaybackEngine, createRNSoundfontRenderer };
+export { RNXmlParser, RNFileExporter, RNSamplePlaybackEngine, createRNSoundfontRenderer };
 /**
  * Deliberately *not* re-exported here: the app that owns the soundfont needs
  * `MEASURED_FROM_SHA256` to check the two still agree, and reaching it through
@@ -62,8 +60,6 @@ export function createMusicIo(options: RNMusicIoOptions = {}): MusicIo {
     xmlParser: new RNXmlParser(),
     // The same codec as web: Standard MIDI File encoding is byte manipulation
     // with no platform APIs in it.
-    midiCodec: new ToneJsMidiCodec(),
-    modCodec: new SharedTrackerCodec(),
     // Decoding borrows the OS decoder through `react-native-audio-api`; both
     // encoders are pure JS in `shared/`.
     audioCodec: createRNAudioCodec(),

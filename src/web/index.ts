@@ -5,8 +5,6 @@
 import { createWebMidiInput } from './midi/web-midi-input.js';
 import { WebXmlParser } from './xml/xml.web.js';
 import { WebFileExporter } from './file/file.web.js';
-import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
-import { SharedTrackerCodec } from '../shared/mod/codec.js';
 import { createWebAudioCodec } from './audio/web-audio-codec.js';
 import { createSoundfontRenderer } from './audio/soundfont-render.js';
 import { SoundfontPlaybackEngine } from './playback/soundfont-engine.js';
@@ -15,7 +13,7 @@ import { SynthHost } from './playback/synth-host.js';
 import type { SynthInstance } from './playback/synth-host.js';
 import type { MusicIo } from '../shared/types.js';
 
-export { WebXmlParser, WebFileExporter, ToneJsMidiCodec };
+export { WebXmlParser, WebFileExporter };
 export * from '../shared/playback/midi.js';
 export type { MusicIo };
 
@@ -64,8 +62,6 @@ export function createMusicIo({
       fontUrl: soundfont.fontUrl,
     }),
     xmlParser: new WebXmlParser(),
-    midiCodec: new ToneJsMidiCodec(),
-    modCodec: new SharedTrackerCodec(),
     audioCodec: createWebAudioCodec(),
     // Export goes through the same soundfont as playback, so the two cannot drift.
     audioRenderer: {

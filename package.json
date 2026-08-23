@@ -1,11 +1,10 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.7.38",
+  "version": "0.8.1",
   "author": "Sudobility",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sudobility/music_types": "^0.11.35",
-    "@tonejs/midi": "^2.0.28",
+    "@sudobility/music_types": "^0.12.1",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
     "eslint": "^9.38.0",
@@ -19,8 +18,7 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
-    "@sudobility/music_types": "^0.11.35",
-    "@tonejs/midi": "^2.0.28",
+    "@sudobility/music_types": "^0.12.1",
     "fast-xml-parser": ">=5.0.0",
     "js-synthesizer": "^1.13.0",
     "react-native-audio-api": ">=0.13.0",
@@ -61,7 +59,7 @@
       "default": "./dist/rn/playback/gm-pack-name.js"
     }
   },
-  "description": "Platform implementations for ScoreSmith: playback, XML parsing, file export and MIDI codecs, for web and React Native",
+  "description": "Platform implementations for ScoreSmith: playback, audio codecs, XML parsing, file export and live MIDI input, for web and React Native",
   "files": [
     "dist/**/*",
     "CLAUDE.md"

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MusicIo } from '../shared/types.js';
 // The package's own hand-built module, so this cannot drift from the reader.
-import { buildMod } from '../shared/mod/fixture.js';
 
 /**
  * What a platform promises about the two capabilities that are not universal.
@@ -61,26 +60,9 @@ export function runPlatformContract(
       const io = createIo();
       expect(io.playback).toBeDefined();
       expect(io.xmlParser).toBeDefined();
-      expect(io.midiCodec).toBeDefined();
       expect(io.fileExporter).toBeDefined();
       expect(io.audioCodec).toBeDefined();
-      expect(io.modCodec).toBeDefined();
       expect(io.audioRenderer).toBeDefined();
-    });
-
-    it('rejects bytes that are not a module', () => {
-      // A garbage score is worse than a clear failure: it looks like the file
-      // imported and quietly is not the music.
-      expect(() => createIo().modCodec.decode(new ArrayBuffer(64))).toThrow();
-    });
-
-    it('decodes a module to its patterns and order, leaving pitch to music_lib', () => {
-      const io = createIo();
-      const file = io.modCodec.decode(buildMod({}));
-      expect(file.channels).toBe(4);
-      expect(file.order).toEqual([0]);
-      expect(file.patterns).toHaveLength(1);
-      expect(file.patterns[0]).toHaveLength(64);
     });
 
     it('parses XML and exposes the root element', () => {
@@ -114,30 +96,6 @@ export function runPlatformContract(
 
     it('rejects malformed XML rather than returning a broken root', () => {
       expect(() => createIo().xmlParser.parse('<a><b></a>')).toThrow();
-    });
-
-    it('round-trips MIDI through the codec', () => {
-      const io = createIo();
-      const encoded = io.midiCodec.encode({
-        header: {
-          ppq: 480,
-          tempos: [{ ticks: 0, bpm: 120 }],
-          timeSignatures: [{ ticks: 0, timeSignature: [4, 4] }],
-        },
-        tracks: [
-          {
-            name: 'T',
-            channel: 0,
-            instrument: { number: 0 },
-            notes: [{ midi: 60, ticks: 0, durationTicks: 480, velocity: 0.8 }],
-            controlChanges: {},
-            durationTicks: 480,
-            durationSeconds: 0.5,
-          },
-        ],
-        duration: 0.5,
-      });
-      expect(io.midiCodec.decode(encoded.buffer as ArrayBuffer).tracks[0].notes[0].midi).toBe(60);
     });
 
     it('exposes every PlaybackEngine method', () => {

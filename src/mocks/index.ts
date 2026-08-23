@@ -14,8 +14,6 @@ import type {
   PlaybackPlan,
   PlaybackTrack,
 } from '@sudobility/music_types';
-import { ToneJsMidiCodec } from '../shared/midi/codec.tonejs.js';
-import { SharedTrackerCodec } from '../shared/mod/codec.js';
 import { createMockAudioCodec } from './audio-codec.js';
 import { MockXmlParser } from './xml.mock.js';
 import type { MusicIo } from '../shared/types.js';
@@ -112,24 +110,12 @@ export class MockFileExporter implements FileExporter {
 }
 
 export { MockXmlParser };
-/**
- * A hand-built ProTracker module, for downstream tests.
- *
- * Exported from `/mocks` — the test-facing entry — so the app's e2e can build
- * a real module to import without a second builder that could drift from the
- * reader this package ships.
- */
-export { buildMod } from '../shared/mod/fixture.js';
 export type { MusicIo };
 
 export function createMusicIo(): MusicIo {
   return {
     playback: new MockPlaybackEngine(),
     xmlParser: new MockXmlParser(),
-    // The real codec: MIDI encoding is pure byte manipulation, so faking it
-    // would only weaken the tests that use it.
-    midiCodec: new ToneJsMidiCodec(),
-    modCodec: new SharedTrackerCodec(),
     audioCodec: createMockAudioCodec(),
     audioRenderer: {
       // No audio context here; rendering is a browser capability.

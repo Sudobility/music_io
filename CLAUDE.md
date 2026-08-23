@@ -6,18 +6,34 @@
 > finishing a task is not permission to commit it.
 
 Platform implementations for Moosiac: playback, XML parsing, file export and
-the MIDI codec, for web and React Native. One of six repos in the family — see
+live MIDI input, for web and React Native. One of six repos in the family — see
 `music_app/docs/architecture.md`.
 
 The contracts live in `@sudobility/music_types`; this package implements them so
 `@sudobility/music_lib` can stay free of any platform library and run unchanged
 on both platforms.
 
+**The line this package holds: notes go to `music_codecs`, samples stay here.**
+A format that carries notes — MIDI, MusicXML, the tracker modules — is byte
+arithmetic against a published spec, runs identically on web, React Native and
+the server, and lives in `@sudobility/music_codecs`. A format that carries
+sampled sound — WAV, MP3 — needs a real audio context and lives here, with
+playback, file export and MIDI input.
+
+The score codecs used to be here, injected as `midiCodec` and `modCodec` on
+`MusicIo` for surface consistency. The cost was concrete: `ToneJsMidiCodec` had
+to be hand-copied into music_lib, music_api and music_codecs' own test folder,
+because the one real implementation sat in the platform package where the
+server could not reach it. Two things stayed behind and are **not** exceptions
+to the rule: `XmlParser`, because `DOMParser` and `fast-xml-parser` are
+genuinely different implementations rather than one shared module pretending to
+be two, and `MidiInput`, which is a device rather than a file format.
+
 ## Tech Stack
 
 - TypeScript (strict, ESM only), Bun, **Vitest** (not `bun test`)
 - `js-synthesizer` (libfluidsynth in an AudioWorklet — the web engine),
-  `@tonejs/midi` (SMF codec), `fast-xml-parser` (RN XML), `react-native-fs` /
+  `fast-xml-parser` (RN XML), `react-native-fs` /
   `react-native-share` (RN file export) — **all optional peer dependencies**.
   `@breezystack/lamejs` is the one runtime dependency; see Gotchas. `tone` is
   gone: the web engine is the soundfont synth, and RN has no engine at all.
@@ -31,7 +47,7 @@ on both platforms.
 
 - `src/web/` — `SoundfontPlaybackEngine` and its scheduling/mixing modules (~1,500 lines, the bulk of this package), the offline soundfont renderer, `WebXmlParser`, `WebFileExporter`
 - `src/rn/` — `RNXmlParser`, `RNFileExporter`, a full audio codec (OS decoder via `react-native-audio-api`, shared encoders), and `playback/` — `RNSamplePlaybackEngine`, a sample-based FluidR3 engine
-- `src/shared/` — the `MusicIo` bundle type, `ToneJsMidiCodec`, `SharedModCodec`, the wav/mp3 encoders and mono mixdown, and `playback/` (score flattening, note cursor, dispatch window, master trim, MIDI maths) — the transport half both engines run. Everything here is pure logic over bytes and numbers, which is the test for belonging in it
+- `src/shared/` — the `MusicIo` bundle type, the wav/mp3 encoders and mono mixdown, `midi/unsupported-midi-input.ts`, and `playback/` (score flattening, note cursor, dispatch window, master trim, MIDI maths) — the transport half both engines run. Everything here is pure logic over bytes and numbers, which is the test for belonging in it. **That test is necessary but not sufficient**: the MIDI and tracker codecs were pure logic over bytes too, and belonged in `@sudobility/music_codecs` because the *server* needs them. What stays here is what a platform must provide
 - `src/mocks/` — test doubles, including a small hand-rolled XML reader
 - `src/contract/` — `runPlatformContract`, the suite every entry is held to
 
@@ -64,11 +80,6 @@ on both platforms.
   bidirectional. It is also why music_lib's tests use `music_io/mocks` and never
   `music_io/web`: the web entry imports music_lib and would pull its own
   published dist back in.
-- **`ToneJsMidiCodec` is shared by both platforms on purpose.** SMF encoding is
-  byte manipulation with no platform APIs, and `@tonejs/midi` works under Metro.
-  The seam exists so music_lib carries no MIDI dependency and a future ESM codec
-  can replace this one without music_lib changing — it does **not**, by itself,
-  remove CommonJS from the graph.
 - **`@tonejs/midi` is read off the module namespace, not by named import.** It
   publishes CommonJS as `main` and ESM only via `module`, with no exports map, so
   whether a named import works depends on which build the resolver picked. Bun
@@ -99,15 +110,6 @@ on both platforms.
   deleted synthesised oscillator approximations, which is a different and much
   worse thing. See `spikes/rn-sample-playback.md`.
 - **`applyMix(score)` exists because mute and solo had setters and volume and pan did not.** A track's volume was read once at `loadScore` and pan only in `applyScoreToHost`, so once `music_lib`'s edit lock made a mix change stop reloading the score, moving a fader mid-playback moved the fader and not the sound. The web engine pushes CC7 and CC10 from the score and schedules nothing. **The RN engine reaches the same place with a node instead of a control change:** one gain-and-panner strip per track, built on first use, with voices connecting to their track's strip rather than to the master. Per-track rather than per-voice — the offline renderer builds a panner per voice because it schedules once and never changes its mind, where a live fader has to move under notes that are already sounding. That also settles where the headroom trim lives on RN: on the master, as it is on web, not multiplied into every voice's gain. **The metronome click bypasses the master on both platforms** so a score with more parts does not get a quieter click.
-- **The DSM reader's offsets were measured against a real file, not read from a specification — and two of them contradict the usual documentation.** `numOrders` sits at `SONG+36`, where `+34` is `restartPos` and yields 127 instead of 31; the `INST` name sits at `+36` of a 64-byte header. Both were pinned by arithmetic that has to close: the order list's maximum equals `numPatterns - 1`, and `64 + length` equals the chunk length for every instrument. A real module lives in `src/shared/tracker/fixtures/` so those offsets stay honest. **`NOTE_BASE` is the one value still unconfirmed** — the file carries no reference pitch and no note-off, so it fixes note *spacing* but not the absolute octave. It currently produces E3-B5 for that module, which is plausible but not proof; an octave error would move every note together and pass every test here.
-- **DSM shares ProTracker's effect lettering**, which is why `protracker-effects.ts` is shared with the MOD reader rather than written twice. Verified on the real file: effect `0x0F` with parameters 5 and 114, splitting at `0x20` exactly as MOD does. S3M, XM and IT letter theirs differently and will bring their own normalisers.
-- **S3M is parapointer-addressed, so nothing is read by walking forward.** The header carries tables of 16-bit pointers which, times sixteen, give file offsets for each instrument and pattern. It has **its own effect normaliser** (`s3m-effects.ts`) because commands are numbered 1=A..26=Z rather than nibbled: `A` sets speed, `T` sets tempo, `C` breaks the pattern, and there is none of MOD's `0x20` split to make.
-- **Two S3M behaviours contradict the format documentation, and both have a real file in `fixtures/` that exhibits them.** `portal_to_hell.s3m` (54606) yields 62-63 rows for *every* pattern and most run one byte past their declared length, because the writer omits trailing empty rows and sometimes the final terminator — so the reader never trusts the declared length to terminate and never requires 64 rows of data. `moving_that_rhythm.s3m` (69391) enables 16 channels in its header while its patterns reach only 0-8 — so the row width is `max(enabled, highestUsed + 1)`, erring wide because empty columns are harmless (tracks come from instruments) and erring narrow loses notes. Do not "simplify" either rule back out; a decoder written from the specification rejects the first file outright.
-- **In XM almost nothing has a fixed size, and the instrument header is the one that catches people.** The file header, every pattern header and every instrument header declare their own length. An instrument with *no samples* writes 33 bytes where one with samples writes 263, and real modules mix them freely — `sunlight.xm` has eight empty among fifteen — so assuming 263 desynchronises everything after the first. Finding the next instrument needs all three of the header size, the sample-header size and the sum of every sample's length. Patterns come *before* instruments, so the instruments can only be found by walking every pattern first.
-- **XM patterns carry their own row count, and `packedSize = 0` means blank rows rather than none.** `dr_wily.xm` holds a 76-row pattern among its 64s and four empty patterns; `mercury.xm` holds 32s and 56s. XM is the first format here that is not fixed at 64, which makes it the first real test of that axis of `TrackerModule` — and it needed no change. Emitting nothing for an empty pattern would shorten the song and shift everything after it.
-- **XM reuses `applyProTrackerEffect`,** unlike S3M. Verified across four real modules: effect `F` carried parameters 1-24 and 125, splitting at `0x20` exactly as MOD does, and `D` is a pattern break. **Not verified:** XM's per-sample relative-note and finetune are ignored, so a module using them imports transposed — the same class of limitation as MOD's finetune.
-- **`periodToMidi` lives here, beside the MOD reader, and that is deliberate.** It is a musical conversion, which would normally put it in music_lib — but MOD is the only tracker format that stores Amiga periods; every other one stores note numbers directly. Converting at the decoder is what lets the neutral `TrackerCell` carry a plain note number and keeps "periods are a ProTracker detail" true. Its finetune approximation is documented in that file.
-- **`SharedTrackerCodec` decodes MOD today and is the entry point for the rest.** The `MusicIo` property is still named `modCodec`; renaming it reaches into music_app and belongs with the change that widens the accepted extensions.
 - **The transport is shared; only voicing is per platform.** `shared/playback/`
   holds score flattening, the note cursor, the sounding set, the dispatch window
   and the master trim. `governor.ts` and `channel-allocator.ts`
