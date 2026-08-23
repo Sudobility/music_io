@@ -16,4 +16,4 @@ import { createMusicIo } from './index.js';
  * against an `OfflineAudioContext` and shares `PackLibrary` and `planVoice`
  * with the engine, so an export is voiced identically to what was heard.
  */
-runPlatformContract('rn', createMusicIo, { playback: 'accepts', offlineRender: 'renders' });
+runPlatformContract('rn', createMusicIo);

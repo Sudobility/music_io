@@ -1,5 +1,5 @@
 import type { FileExporter } from '@sudobility/music_types';
-import { bytesToBase64 } from '../base64.js';
+import { bytesToBase64 } from '@sudobility/music_types';
 
 /** The subset of `react-native-fs` this needs, structural so a test can stand in for it. */
 type RNFSLike = {
