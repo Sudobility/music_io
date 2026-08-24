@@ -11,7 +11,7 @@
       "devDependencies": {
         "@eslint/js": "^10.0.1",
         "@sudobility/music_codecs": "^0.2.1",
-        "@sudobility/music_types": "^0.13.2",
+        "@sudobility/music_types": "^0.13.3",
         "@typescript-eslint/eslint-plugin": "^8.65.0",
         "@typescript-eslint/parser": "^8.65.0",
         "eslint": "^9.38.0",
@@ -24,7 +24,7 @@
         "vitest": "^4.1.10",
       },
       "peerDependencies": {
-        "@sudobility/music_types": "^0.13.2",
+        "@sudobility/music_types": "^0.13.3",
         "fast-xml-parser": ">=5.0.0",
         "react-native-fs": ">=2.20.0",
         "react-native-share": ">=10.0.0",
@@ -137,7 +137,7 @@
 
     "@sudobility/music_codecs": ["@sudobility/music_codecs@0.2.1", "", { "peerDependencies": { "@sudobility/music_types": "^0.12.1" } }, "sha512-sEXE6U0VcFowKJjXRTljcCBUSc28C9XRylWpDc5ODwqWu3aPD5nwkKYO658NbJHzCrzX9oiOnoel+VPL9Lw20w=="],
 
-    "@sudobility/music_types": ["@sudobility/music_types@0.13.2", "", { "dependencies": { "immer": "^10.0.0 || ^11.0.0", "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/types": "^1.9.66" } }, "sha512-fTVhlIOndlH3vJCslKYAHnPcGVb21he0qXS4RdEmIEorthuXRVLDIKCRTzCeSlbrYyp59BKzORLU1ndqA2UQng=="],
+    "@sudobility/music_types": ["@sudobility/music_types@0.13.3", "", { "dependencies": { "immer": "^10.0.0 || ^11.0.0", "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/types": "^1.9.66" } }, "sha512-e7fpxVNW1AXPMwlVyvwcyXVZDJJ5AWqYXxBtNhwsks0TX+SsEfM3LvJjrGWCkWzErIqM135zQ7xunwX5jloZFQ=="],
 
     "@sudobility/types": ["@sudobility/types@1.9.62", "", {}, "sha512-GOkz5oE7Fmlolba2aemBF2fKPtH4I2lHAjVta+fqZAoAV72DQaWYzVEjTwKZs/ACY/g9Z262IDa7lEh+IOrn7w=="],
 
