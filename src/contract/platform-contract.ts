@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import type { MusicIo } from '../shared/types.js';
+import { describe, expect, it } from "vitest";
+import type { MusicIo } from "../shared/types.js";
 // The package's own hand-built module, so this cannot drift from the reader.
 
 /**
@@ -22,20 +22,20 @@ export function runPlatformContract(
   createIo: () => MusicIo,
 ): void {
   describe(`${name}: platform contract`, () => {
-    it('provides every service', () => {
+    it("provides every service", () => {
       const io = createIo();
       expect(io.xmlParser).toBeDefined();
       expect(io.fileExporter).toBeDefined();
       expect(io.audioCodec).toBeDefined();
     });
 
-    it('parses XML and exposes the root element', () => {
+    it("parses XML and exposes the root element", () => {
       const root = createIo().xmlParser.parse(
         '<score-partwise version="4.0"><part id="P1"/></score-partwise>',
       );
-      expect(root.tagName).toBe('score-partwise');
-      expect(root.getAttribute('version')).toBe('4.0');
-      expect(Array.from(root.children)[0].tagName).toBe('part');
+      expect(root.tagName).toBe("score-partwise");
+      expect(root.getAttribute("version")).toBe("4.0");
+      expect(Array.from(root.children)[0].tagName).toBe("part");
     });
 
     /**
@@ -50,21 +50,19 @@ export function runPlatformContract(
      * not recoverable from that, so the divergence is the parser's and cannot be
      * closed here. MusicXML has no mixed content, so nothing depends on it.
      */
-    it('reports textContent from descendant text, not only the element\'s own', () => {
+    it("reports textContent from descendant text, not only the element's own", () => {
       const root = createIo().xmlParser.parse(
-        '<score-partwise><part><measure><note>C4</note></measure></part></score-partwise>',
+        "<score-partwise><part><measure><note>C4</note></measure></part></score-partwise>",
       );
-      const part = root.getElementsByTagName('part')[0];
-      expect(part.textContent).toBe('C4');
+      const part = root.getElementsByTagName("part")[0];
+      expect(part.textContent).toBe("C4");
     });
 
-    it('rejects malformed XML rather than returning a broken root', () => {
-      expect(() => createIo().xmlParser.parse('<a><b></a>')).toThrow();
+    it("rejects malformed XML rather than returning a broken root", () => {
+      expect(() => createIo().xmlParser.parse("<a><b></a>")).toThrow();
     });
 
-
-
-    it('writes a real WAV file, not a bare buffer', () => {
+    it("writes a real WAV file, not a bare buffer", () => {
       const io = createIo();
       const sampleRate = 44100;
       const samples = new Float32Array(sampleRate / 10);
@@ -73,8 +71,8 @@ export function runPlatformContract(
       }
 
       const wav = io.audioCodec.encodeWav({ samples, sampleRate });
-      expect(new TextDecoder().decode(new Uint8Array(wav, 0, 4))).toBe('RIFF');
-      expect(new TextDecoder().decode(new Uint8Array(wav, 8, 4))).toBe('WAVE');
+      expect(new TextDecoder().decode(new Uint8Array(wav, 0, 4))).toBe("RIFF");
+      expect(new TextDecoder().decode(new Uint8Array(wav, 8, 4))).toBe("WAVE");
       expect(wav.byteLength).toBe(44 + samples.length * 2);
     });
   });

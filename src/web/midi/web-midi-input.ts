@@ -13,7 +13,7 @@ import type {
   MidiInputDevice,
   MidiInputEvent,
   MidiInputHandler,
-} from '@sudobility/music_types';
+} from "@sudobility/music_types";
 
 /** Status byte high nibbles. The low nibble is the channel, which we ignore. */
 const NOTE_OFF = 0x80;
@@ -36,16 +36,20 @@ type MIDIInputLike = {
  * instead of a real note-off, and a caller that took it literally would leave
  * the note sounding forever.
  */
-export function decodeMidiMessage(data: Uint8Array | null): MidiInputEvent | null {
+export function decodeMidiMessage(
+  data: Uint8Array | null,
+): MidiInputEvent | null {
   if (!data || data.length < 3) return null;
   const status = data[0] & 0xf0;
   const note = data[1];
   const velocity = data[2];
 
   if (status === NOTE_ON) {
-    return velocity > 0 ? { type: 'on', note, velocity } : { type: 'off', note };
+    return velocity > 0
+      ? { type: "on", note, velocity }
+      : { type: "off", note };
   }
-  if (status === NOTE_OFF) return { type: 'off', note };
+  if (status === NOTE_OFF) return { type: "off", note };
   return null;
 }
 
@@ -55,8 +59,9 @@ export function createWebMidiInput(): MidiInput {
   const handlers = new Set<{ handler: MidiInputHandler; deviceId?: string }>();
 
   const supported = (): boolean =>
-    typeof navigator !== 'undefined' &&
-    typeof (navigator as { requestMIDIAccess?: unknown }).requestMIDIAccess === 'function';
+    typeof navigator !== "undefined" &&
+    typeof (navigator as { requestMIDIAccess?: unknown }).requestMIDIAccess ===
+      "function";
 
   /** Points every attached port at the fan-out below. */
   const wire = (): void => {
@@ -77,7 +82,9 @@ export function createWebMidiInput(): MidiInput {
     if (access) return access;
     const request = (
       navigator as unknown as {
-        requestMIDIAccess: (options: { sysex: boolean }) => Promise<MIDIAccessLike>;
+        requestMIDIAccess: (options: {
+          sysex: boolean;
+        }) => Promise<MIDIAccessLike>;
       }
     ).requestMIDIAccess;
     access = await request.call(navigator, { sysex: false });
@@ -93,7 +100,7 @@ export function createWebMidiInput(): MidiInput {
       const midi = await ensureAccess();
       return [...midi.inputs.values()].map((input) => ({
         id: input.id,
-        name: input.name ?? 'MIDI device',
+        name: input.name ?? "MIDI device",
       }));
     },
 

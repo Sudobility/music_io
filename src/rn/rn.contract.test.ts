@@ -1,5 +1,5 @@
-import { runPlatformContract } from '../contract/platform-contract.js';
-import { createMusicIo } from './index.js';
+import { runPlatformContract } from "../contract/platform-contract.js";
+import { createMusicIo } from "./index.js";
 
 /**
  * The RN entry needs no native module faked, because it imports none eagerly:
@@ -16,4 +16,4 @@ import { createMusicIo } from './index.js';
  * against an `OfflineAudioContext` and shares `PackLibrary` and `planVoice`
  * with the engine, so an export is voiced identically to what was heard.
  */
-runPlatformContract('rn', createMusicIo);
+runPlatformContract("rn", createMusicIo);

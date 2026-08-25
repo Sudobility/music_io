@@ -9,16 +9,17 @@
  * Both encoders live in `shared/audio/`, because neither ever needed a browser:
  * wav is a header writer and mp3 is lamejs, both pure JavaScript.
  */
-import type { AudioCodec, DecodedAudio } from '@sudobility/music_types';
-import { encodeWav } from '../../shared/audio/wav.js';
-import { encodeMp3, toMono } from '../../shared/audio/mp3.js';
+import type { AudioCodec, DecodedAudio } from "@sudobility/music_types";
+import { encodeWav } from "../../shared/audio/wav.js";
+import { encodeMp3, toMono } from "../../shared/audio/mp3.js";
 
 export function createWebAudioCodec(): AudioCodec {
   return {
     async decode(bytes: ArrayBuffer): Promise<DecodedAudio> {
       const Ctor =
         window.AudioContext ??
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
       const ctx = new Ctor();
       try {
         // `slice(0)`: decodeAudioData detaches the buffer it is given, which

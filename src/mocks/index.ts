@@ -5,20 +5,26 @@
  * music_lib's and music_app's tests exercise the same fakes this package's own
  * contract suite does.
  */
-import { createUnsupportedMidiInput } from '../shared/midi/unsupported-midi-input.js';
-import type {
-  FileExporter,
-} from '@sudobility/music_types';
-import { createMockAudioCodec } from './audio-codec.js';
-import { MockXmlParser } from './xml.mock.js';
-import { createScoreFiles } from '../shared/score-files.js';
-import type { MusicIo } from '../shared/types.js';
+import { createUnsupportedMidiInput } from "../shared/midi/unsupported-midi-input.js";
+import type { FileExporter } from "@sudobility/music_types";
+import { createMockAudioCodec } from "./audio-codec.js";
+import { MockXmlParser } from "./xml.mock.js";
+import { createScoreFiles } from "../shared/score-files.js";
+import type { MusicIo } from "../shared/types.js";
 
 /** Records saves instead of touching a filesystem or a download. */
 export class MockFileExporter implements FileExporter {
-  readonly saved: Array<{ name: string; mimeType: string; data: Uint8Array | string }> = [];
+  readonly saved: Array<{
+    name: string;
+    mimeType: string;
+    data: Uint8Array | string;
+  }> = [];
 
-  async save(name: string, data: Uint8Array | string, mimeType: string): Promise<void> {
+  async save(
+    name: string,
+    data: Uint8Array | string,
+    mimeType: string,
+  ): Promise<void> {
     this.saved.push({ name, data, mimeType });
   }
 }

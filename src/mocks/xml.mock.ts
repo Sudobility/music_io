@@ -1,5 +1,5 @@
-import { XmlParseError } from '@sudobility/music_types';
-import type { XmlElement, XmlParser } from '@sudobility/music_types';
+import { XmlParseError } from "@sudobility/music_types";
+import type { XmlElement, XmlParser } from "@sudobility/music_types";
 
 /**
  * A deliberately small XML reader, so the mocks entry needs no DOM and no
@@ -11,9 +11,15 @@ import type { XmlElement, XmlParser } from '@sudobility/music_types';
  * (no namespaces, entities or CDATA) and is not exported from the package root
  * for that reason: anything real should use the web or React Native parser.
  */
-type Node = { tagName: string; attributes: Record<string, string>; children: Node[]; text: string };
+type Node = {
+  tagName: string;
+  attributes: Record<string, string>;
+  children: Node[];
+  text: string;
+};
 
-const TOKEN = /<\/?([A-Za-z_][\w.-]*)((?:\s+[\w:.-]+\s*=\s*"[^"]*")*)\s*(\/?)>|([^<]+)/g;
+const TOKEN =
+  /<\/?([A-Za-z_][\w.-]*)((?:\s+[\w:.-]+\s*=\s*"[^"]*")*)\s*(\/?)>|([^<]+)/g;
 const ATTR = /([\w:.-]+)\s*=\s*"([^"]*)"/g;
 
 function parseAttributes(source: string): Record<string, string> {
@@ -25,9 +31,9 @@ function parseAttributes(source: string): Record<string, string> {
 /** Strips the XML declaration, comments and DOCTYPE, none of which carry data. */
 function stripPreamble(text: string): string {
   return text
-    .replace(/<\?[\s\S]*?\?>/g, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<!DOCTYPE[^>[]*(\[[\s\S]*?\])?\s*>/gi, '');
+    .replace(/<\?[\s\S]*?\?>/g, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!DOCTYPE[^>[]*(\[[\s\S]*?\])?\s*>/gi, "");
 }
 
 function parseNodes(rawText: string): Node {
@@ -44,7 +50,7 @@ function parseNodes(rawText: string): Node {
       continue;
     }
 
-    if (raw.startsWith('</')) {
+    if (raw.startsWith("</")) {
       const open = stack.pop();
       if (!open || open.tagName !== tagName) {
         throw new XmlParseError(`Unbalanced tag: </${tagName}>`);
@@ -53,18 +59,26 @@ function parseNodes(rawText: string): Node {
       continue;
     }
 
-    const node: Node = { tagName, attributes: parseAttributes(attributeSource ?? ''), children: [], text: '' };
+    const node: Node = {
+      tagName,
+      attributes: parseAttributes(attributeSource ?? ""),
+      children: [],
+      text: "",
+    };
     if (stack.length > 0) stack[stack.length - 1].children.push(node);
 
-    if (selfClosing === '/') {
+    if (selfClosing === "/") {
       if (stack.length === 0) root = node;
     } else {
       stack.push(node);
     }
   }
 
-  if (stack.length > 0) throw new XmlParseError(`Unclosed tag: <${stack[stack.length - 1].tagName}>`);
-  if (!root) throw new XmlParseError('The XML document has no root element.');
+  if (stack.length > 0)
+    throw new XmlParseError(
+      `Unclosed tag: <${stack[stack.length - 1].tagName}>`,
+    );
+  if (!root) throw new XmlParseError("The XML document has no root element.");
   return root;
 }
 
@@ -77,8 +91,8 @@ class MockElement implements XmlElement {
 
   get textContent(): string | null {
     const childText = this.node.children
-      .map((child) => new MockElement(child).textContent ?? '')
-      .join('');
+      .map((child) => new MockElement(child).textContent ?? "")
+      .join("");
     const text = `${this.node.text}${childText}`;
     return text.length > 0 ? text : null;
   }

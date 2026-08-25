@@ -12,7 +12,7 @@
  * the libraries' full APIs would invite use of members that have not been
  * thought about on this side of the boundary.
  */
-declare module 'react-native-audio-api' {
+declare module "react-native-audio-api" {
   /**
    * The shape `decodeAudioData` resolves with: `AudioBuffer`-compatible, which
    * is what lets `shared/audio/mp3.ts`'s mixdown take it and the browser's
@@ -34,7 +34,10 @@ declare module 'react-native-audio-api' {
    * Added in 0.13; the peer range says so, and `rn/audio-codec.ts` reports a
    * missing export as a version problem rather than a mysterious undefined.
    */
-  export function decodeAudioData(input: ArrayBuffer, sampleRate?: number): Promise<AudioBuffer>;
+  export function decodeAudioData(
+    input: ArrayBuffer,
+    sampleRate?: number,
+  ): Promise<AudioBuffer>;
 
   /**
    * The nodes `playback/sample-engine.ts` builds a voice out of.
@@ -56,7 +59,7 @@ declare module 'react-native-audio-api' {
   }
 }
 
-declare module 'react-native-fs' {
+declare module "react-native-fs" {
   export type ReadDirItem = {
     name: string;
     path: string;
@@ -66,7 +69,11 @@ declare module 'react-native-fs' {
   export function mkdir(path: string): Promise<void>;
   export function readDir(path: string): Promise<ReadDirItem[]>;
   export function unlink(path: string): Promise<void>;
-  export function writeFile(path: string, contents: string, encoding: string): Promise<void>;
+  export function writeFile(
+    path: string,
+    contents: string,
+    encoding: string,
+  ): Promise<void>;
   const RNFS: {
     CachesDirectoryPath: string;
     mkdir: typeof mkdir;
@@ -77,7 +84,7 @@ declare module 'react-native-fs' {
   export default RNFS;
 }
 
-declare module 'react-native-share' {
+declare module "react-native-share" {
   export type ShareOpenOptions = {
     url?: string;
     type?: string;

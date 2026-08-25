@@ -11,8 +11,8 @@
 // throws `ReferenceError: MPEGMode is not defined`. The fork exists to fix
 // exactly that — and it is why this works under Metro, where there is no
 // browser global scope at all.
-import { Mp3Encoder } from '@breezystack/lamejs';
-import type { DecodedAudio } from '@sudobility/music_types';
+import { Mp3Encoder } from "@breezystack/lamejs";
+import type { DecodedAudio } from "@sudobility/music_types";
 
 /** One MPEG frame's worth of samples. lamejs expects to be fed in these units. */
 const BLOCK = 1152;
@@ -72,7 +72,8 @@ export function toMono(buffer: ChannelSource): Float32Array {
   const out = new Float32Array(buffer.length);
   for (let c = 0; c < buffer.numberOfChannels; c += 1) {
     const data = buffer.getChannelData(c);
-    for (let i = 0; i < data.length; i += 1) out[i] += data[i]! / buffer.numberOfChannels;
+    for (let i = 0; i < data.length; i += 1)
+      out[i] += data[i]! / buffer.numberOfChannels;
   }
   return out;
 }

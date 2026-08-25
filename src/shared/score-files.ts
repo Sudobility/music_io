@@ -31,7 +31,7 @@ import {
   decodeTracker,
   encodeTracker,
   trackerToScore,
-} from '@sudobility/music_codecs';
+} from "@sudobility/music_codecs";
 import type {
   MidiImportOptions,
   MidiImportResult,
@@ -39,21 +39,21 @@ import type {
   MusicXmlImportResult,
   MusicXmlWarnings,
   TrackerModule,
-} from '@sudobility/music_codecs';
+} from "@sudobility/music_codecs";
 import type {
   AudioCodec,
   FileExporter,
   Score,
   XmlParser,
-} from '@sudobility/music_types';
+} from "@sudobility/music_types";
 
 /** MIME types the platform exporters hand to the OS. */
 const MIME = {
-  midi: 'audio/midi',
-  musicxml: 'application/vnd.recordare.musicxml+xml',
-  tracker: 'application/octet-stream',
-  wav: 'audio/wav',
-  mp3: 'audio/mpeg',
+  midi: "audio/midi",
+  musicxml: "application/vnd.recordare.musicxml+xml",
+  tracker: "application/octet-stream",
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
 } as const;
 
 export type ScoreFiles = {
@@ -71,7 +71,7 @@ export type ScoreFiles = {
   saveAudio(
     samples: Float32Array,
     sampleRate: number,
-    format: 'wav' | 'mp3',
+    format: "wav" | "mp3",
     filename: string,
   ): Promise<void>;
 };
@@ -129,7 +129,7 @@ export function createScoreFiles(deps: {
     saveAudio: async (samples, sampleRate, format, filename) => {
       const audio = { samples, sampleRate };
       const bytes =
-        format === 'wav'
+        format === "wav"
           ? audioCodec.encodeWav(audio)
           : audioCodec.encodeMp3(audio);
       await fileExporter.save(filename, new Uint8Array(bytes), MIME[format]);

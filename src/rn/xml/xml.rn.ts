@@ -1,15 +1,15 @@
-import { XMLParser, XMLValidator } from 'fast-xml-parser';
-import { XmlParseError } from '@sudobility/music_types';
-import type { XmlElement, XmlParser } from '@sudobility/music_types';
+import { XMLParser, XMLValidator } from "fast-xml-parser";
+import { XmlParseError } from "@sudobility/music_types";
+import type { XmlElement, XmlParser } from "@sudobility/music_types";
 
-const ATTR_PREFIX = '@_';
-const TEXT_KEY = '#text';
+const ATTR_PREFIX = "@_";
+const TEXT_KEY = "#text";
 
 type FxpNode = Record<string, unknown>;
 
 /** An element whose content is only text parses to a bare string, not an object. */
 function isElementNode(value: unknown): value is FxpNode {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -28,7 +28,9 @@ class FxpElement implements XmlElement {
 
   get textContent(): string | null {
     if (!isElementNode(this.node)) {
-      return this.node === undefined || this.node === null ? null : String(this.node);
+      return this.node === undefined || this.node === null
+        ? null
+        : String(this.node);
     }
     // Own text, then descendants. DOM interleaves the two in document order;
     // `fast-xml-parser` collapses an element's text nodes into one `#text` key
@@ -42,7 +44,7 @@ class FxpElement implements XmlElement {
     for (const child of Array.from(this.children)) {
       if (child.textContent !== null) parts.push(child.textContent);
     }
-    return parts.length > 0 ? parts.join('') : null;
+    return parts.length > 0 ? parts.join("") : null;
   }
 
   get children(): ArrayLike<XmlElement> {
@@ -93,13 +95,16 @@ export class RNXmlParser implements XmlParser {
       // which is exactly the bug class this interface exists to remove. Text
       // nodes are excluded: wrapping those turns a leaf's content into an array
       // and there is nothing to normalise about it.
-      isArray: (name, _jpath, _isLeaf, isAttribute) => !isAttribute && name !== TEXT_KEY,
+      isArray: (name, _jpath, _isLeaf, isAttribute) =>
+        !isAttribute && name !== TEXT_KEY,
     }).parse(text) as FxpNode;
 
     const rootName = Object.keys(parsed).find(
-      (key) => !key.startsWith(ATTR_PREFIX) && key !== TEXT_KEY && key !== '?xml',
+      (key) =>
+        !key.startsWith(ATTR_PREFIX) && key !== TEXT_KEY && key !== "?xml",
     );
-    if (!rootName) throw new XmlParseError('The XML document has no root element.');
+    if (!rootName)
+      throw new XmlParseError("The XML document has no root element.");
 
     const value = parsed[rootName];
     return new FxpElement(rootName, Array.isArray(value) ? value[0] : value);

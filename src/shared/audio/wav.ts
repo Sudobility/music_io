@@ -4,10 +4,11 @@
  * Platform-free, so both the web codec and the mocks use the same one rather
  * than growing two headers that can disagree.
  */
-import type { DecodedAudio } from '@sudobility/music_types';
+import type { DecodedAudio } from "@sudobility/music_types";
 
 function writeAscii(view: DataView, offset: number, text: string): void {
-  for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  for (let i = 0; i < text.length; i += 1)
+    view.setUint8(offset + i, text.charCodeAt(i));
 }
 
 export function encodeWav({ samples, sampleRate }: DecodedAudio): ArrayBuffer {
@@ -15,10 +16,10 @@ export function encodeWav({ samples, sampleRate }: DecodedAudio): ArrayBuffer {
   const out = new ArrayBuffer(44 + bytes);
   const view = new DataView(out);
 
-  writeAscii(view, 0, 'RIFF');
+  writeAscii(view, 0, "RIFF");
   view.setUint32(4, 36 + bytes, true);
-  writeAscii(view, 8, 'WAVE');
-  writeAscii(view, 12, 'fmt ');
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
   view.setUint32(16, 16, true); // PCM chunk size
   view.setUint16(20, 1, true); // PCM
   view.setUint16(22, 1, true); // mono
@@ -26,7 +27,7 @@ export function encodeWav({ samples, sampleRate }: DecodedAudio): ArrayBuffer {
   view.setUint32(28, sampleRate * 2, true); // byte rate
   view.setUint16(32, 2, true); // block align
   view.setUint16(34, 16, true); // bits per sample
-  writeAscii(view, 36, 'data');
+  writeAscii(view, 36, "data");
   view.setUint32(40, bytes, true);
 
   for (let i = 0; i < samples.length; i += 1) {

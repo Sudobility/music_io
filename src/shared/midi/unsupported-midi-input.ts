@@ -9,7 +9,7 @@
  * React Native uses this until a native module exists; the mocks use it so a
  * test never touches a real port.
  */
-import type { MidiInput, MidiInputDevice } from '@sudobility/music_types';
+import type { MidiInput, MidiInputDevice } from "@sudobility/music_types";
 
 export function createUnsupportedMidiInput(): MidiInput {
   return {

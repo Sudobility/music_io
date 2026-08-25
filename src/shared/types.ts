@@ -1,10 +1,10 @@
-import type { ScoreFiles } from './score-files.js';
+import type { ScoreFiles } from "./score-files.js";
 import type {
   AudioCodec,
   FileExporter,
   MidiInput,
   XmlParser,
-} from '@sudobility/music_types';
+} from "@sudobility/music_types";
 
 /**
  * Everything a platform provides. Each entry point (`web`, `rn`, `mocks`)

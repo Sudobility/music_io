@@ -3,12 +3,12 @@
  * `react-native` branch of this package's export condition, so app code imports
  * `@sudobility/music_io` and never branches on platform.
  */
-import { createUnsupportedMidiInput } from '../shared/midi/unsupported-midi-input.js';
-import { RNXmlParser } from './xml/xml.rn.js';
-import { RNFileExporter } from './file/file.rn.js';
-import { createRNAudioCodec } from './audio-codec.js';
-import { createScoreFiles } from '../shared/score-files.js';
-import type { MusicIo } from '../shared/types.js';
+import { createUnsupportedMidiInput } from "../shared/midi/unsupported-midi-input.js";
+import { RNXmlParser } from "./xml/xml.rn.js";
+import { RNFileExporter } from "./file/file.rn.js";
+import { createRNAudioCodec } from "./audio-codec.js";
+import { createScoreFiles } from "../shared/score-files.js";
+import type { MusicIo } from "../shared/types.js";
 
 export { RNXmlParser, RNFileExporter };
 export type { MusicIo };

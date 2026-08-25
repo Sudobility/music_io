@@ -1,10 +1,14 @@
-import type { FileExporter } from '@sudobility/music_types';
-import { bytesToBase64 } from '@sudobility/music_types';
+import type { FileExporter } from "@sudobility/music_types";
+import { bytesToBase64 } from "@sudobility/music_types";
 
 /** The subset of `react-native-fs` this needs, structural so a test can stand in for it. */
 type RNFSLike = {
   CachesDirectoryPath: string;
-  writeFile: (path: string, contents: string, encoding: string) => Promise<void>;
+  writeFile: (
+    path: string,
+    contents: string,
+    encoding: string,
+  ) => Promise<void>;
   mkdir: (path: string) => Promise<void>;
   readDir: (path: string) => Promise<RNFSEntry[]>;
   unlink: (path: string) => Promise<void>;
@@ -33,7 +37,7 @@ export type RNFileExporterDeps = {
  * somebody else's files. A directory of our own is what makes the cleanup below
  * possible at all.
  */
-const EXPORT_DIR = 'scoresmith-exports';
+const EXPORT_DIR = "scoresmith-exports";
 
 /**
  * How many exports survive a cleanup.
@@ -51,25 +55,30 @@ const EXPORT_DIR = 'scoresmith-exports';
 const KEEP_RECENT_EXPORTS = 1;
 let exportCounter = 0;
 
-async function defaultLoadModules(): Promise<{ fs: RNFSLike; share: RNShareLike }> {
+async function defaultLoadModules(): Promise<{
+  fs: RNFSLike;
+  share: RNShareLike;
+}> {
   const [fsModule, shareModule] = await Promise.all([
-    import('react-native-fs'),
-    import('react-native-share'),
+    import("react-native-fs"),
+    import("react-native-share"),
   ]);
-  const fs = ((fsModule as { default?: unknown }).default ?? fsModule) as RNFSLike;
-  const share = ((shareModule as { default?: unknown }).default ?? shareModule) as RNShareLike;
+  const fs = ((fsModule as { default?: unknown }).default ??
+    fsModule) as RNFSLike;
+  const share = ((shareModule as { default?: unknown }).default ??
+    shareModule) as RNShareLike;
   return { fs, share };
 }
 
 function safeFilename(name: string): string {
   const cleaned = name
-    .normalize('NFC')
-    .replace(/[/\\]/g, '_')
+    .normalize("NFC")
+    .replace(/[/\\]/g, "_")
     // A NUL truncates the name at the OS layer, so what is written is not what
     // was asked for.
-    .replace(/[\t\n\r\0]/g, '')
+    .replace(/[\t\n\r\0]/g, "")
     .trim();
-  return !cleaned || cleaned === '.' || cleaned === '..' ? 'export' : cleaned;
+  return !cleaned || cleaned === "." || cleaned === ".." ? "export" : cleaned;
 }
 
 function defaultExportId(): string {
@@ -90,8 +99,9 @@ function defaultExportId(): string {
 async function pruneOldExports(fs: RNFSLike, dir: string): Promise<void> {
   try {
     const entries = await fs.readDir(dir);
-    const exports = entries
-      .sort((a, b) => (b.mtime?.getTime() ?? 0) - (a.mtime?.getTime() ?? 0));
+    const exports = entries.sort(
+      (a, b) => (b.mtime?.getTime() ?? 0) - (a.mtime?.getTime() ?? 0),
+    );
     for (const stale of exports.slice(KEEP_RECENT_EXPORTS)) {
       await fs.unlink(stale.path).catch(() => undefined);
     }
@@ -118,7 +128,11 @@ async function pruneOldExports(fs: RNFSLike, dir: string): Promise<void> {
 export class RNFileExporter implements FileExporter {
   constructor(private readonly deps: RNFileExporterDeps = {}) {}
 
-  async save(name: string, data: Uint8Array | string, mimeType: string): Promise<void> {
+  async save(
+    name: string,
+    data: Uint8Array | string,
+    mimeType: string,
+  ): Promise<void> {
     const { fs, share } = await (this.deps.loadModules ?? defaultLoadModules)();
 
     const dir = `${fs.CachesDirectoryPath}/${EXPORT_DIR}`;
@@ -129,8 +143,12 @@ export class RNFileExporter implements FileExporter {
     await fs.mkdir(exportDir).catch(() => undefined);
 
     const path = `${exportDir}/${safeFilename(name)}`;
-    const isText = typeof data === 'string';
-    await fs.writeFile(path, isText ? data : bytesToBase64(data), isText ? 'utf8' : 'base64');
+    const isText = typeof data === "string";
+    await fs.writeFile(
+      path,
+      isText ? data : bytesToBase64(data),
+      isText ? "utf8" : "base64",
+    );
 
     await share.open({
       url: `file://${path}`,

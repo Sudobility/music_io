@@ -17,12 +17,15 @@
  * `react-native-audio-api` present (this package's own test run, a Node script)
  * does not throw. Only `decode()` needs it. Same pattern as `file.rn.ts`.
  */
-import type { AudioCodec, DecodedAudio } from '@sudobility/music_types';
-import { encodeWav } from '../shared/audio/wav.js';
-import { encodeMp3, toMono } from '../shared/audio/mp3.js';
-import type { ChannelSource } from '../shared/audio/mp3.js';
+import type { AudioCodec, DecodedAudio } from "@sudobility/music_types";
+import { encodeWav } from "../shared/audio/wav.js";
+import { encodeMp3, toMono } from "../shared/audio/mp3.js";
+import type { ChannelSource } from "../shared/audio/mp3.js";
 
-type DecodeAudioData = (input: ArrayBuffer, sampleRate?: number) => Promise<ChannelSource>;
+type DecodeAudioData = (
+  input: ArrayBuffer,
+  sampleRate?: number,
+) => Promise<ChannelSource>;
 
 /** Overridable for tests, which have no native module to load. */
 export type RNAudioCodecOptions = {
@@ -30,20 +33,22 @@ export type RNAudioCodecOptions = {
 };
 
 async function defaultLoadDecoder(): Promise<DecodeAudioData> {
-  const mod = (await import('react-native-audio-api')) as unknown as {
+  const mod = (await import("react-native-audio-api")) as unknown as {
     decodeAudioData?: DecodeAudioData;
     default?: { decodeAudioData?: DecodeAudioData };
   };
   const decode = mod.decodeAudioData ?? mod.default?.decodeAudioData;
   if (!decode) {
     throw new Error(
-      'react-native-audio-api does not export decodeAudioData; audio import needs >=0.13.',
+      "react-native-audio-api does not export decodeAudioData; audio import needs >=0.13.",
     );
   }
   return decode;
 }
 
-export function createRNAudioCodec(options: RNAudioCodecOptions = {}): AudioCodec {
+export function createRNAudioCodec(
+  options: RNAudioCodecOptions = {},
+): AudioCodec {
   const loadDecoder = options.loadDecoder ?? defaultLoadDecoder;
 
   return {
