@@ -269,3 +269,247 @@ describe("RNFileExporter", () => {
     expect(fakes.writeFile).toHaveBeenCalled();
   });
 });
+
+/**
+ * A platform with no share sheet — macOS.
+ *
+ * `react-native-share` is iOS/Android only and throws from
+ * `getEnforcing('RNShare')` at import, so `loadModules` hands back a null
+ * share rather than a broken one.
+ */
+function desktopDeps(present: string[] = []) {
+  const written: Array<{ path: string; encoding: string }> = [];
+  const writeFile = vi.fn(
+    async (path: string, _contents: string, encoding: string) => {
+      written.push({ path, encoding });
+    },
+  );
+  const mkdir = vi.fn(async (_path: string) => {});
+  const unlink = vi.fn(async (_path: string) => {});
+  const readDir = vi.fn(async (): Promise<Entry[]> => []);
+  const exists = vi.fn(async (path: string) => present.includes(path));
+  const loadModules: NonNullable<
+    RNFileExporterDeps["loadModules"]
+  > = async () => ({
+    fs: {
+      CachesDirectoryPath: "/cache",
+      DownloadDirectoryPath: "/Users/me/Downloads",
+      writeFile,
+      mkdir,
+      readDir,
+      unlink,
+      exists,
+    },
+    share: null,
+  });
+  return { written, writeFile, unlink, loadModules };
+}
+
+describe("RNFileExporter without a share sheet", () => {
+  it("writes the file into Downloads under its own name", async () => {
+    const fakes = desktopDeps();
+    await new RNFileExporter({ loadModules: fakes.loadModules }).save(
+      "Quartet.mid",
+      new Uint8Array([1, 2, 3]),
+      "audio/midi",
+    );
+    expect(fakes.written).toEqual([
+      { path: "/Users/me/Downloads/Quartet.mid", encoding: "base64" },
+    ]);
+  });
+
+  it("writes text as utf8 rather than base64", async () => {
+    const fakes = desktopDeps();
+    await new RNFileExporter({ loadModules: fakes.loadModules }).save(
+      "Quartet.musicxml",
+      "<score/>",
+      "application/vnd.recordare.musicxml+xml",
+    );
+    expect(fakes.written[0]?.encoding).toBe("utf8");
+  });
+
+  it("never overwrites an existing export", async () => {
+    // Losing a score exported an hour ago is the one outcome worth a suffix.
+    const fakes = desktopDeps([
+      "/Users/me/Downloads/Quartet.mid",
+      "/Users/me/Downloads/Quartet (2).mid",
+    ]);
+    await new RNFileExporter({ loadModules: fakes.loadModules }).save(
+      "Quartet.mid",
+      new Uint8Array([1]),
+      "audio/midi",
+    );
+    expect(fakes.written[0]?.path).toBe("/Users/me/Downloads/Quartet (3).mid");
+  });
+
+  it("prunes nothing, because these are the user\u2019s files", async () => {
+    const fakes = desktopDeps();
+    await new RNFileExporter({ loadModules: fakes.loadModules }).save(
+      "Quartet.mid",
+      new Uint8Array([1]),
+      "audio/midi",
+    );
+    expect(fakes.unlink).not.toHaveBeenCalled();
+  });
+});
+
+describe("RNFileExporter when the share sheet is present but broken", () => {
+  /*
+    The real macOS case. `react-native-share` resolves — so the import guard
+    sees nothing wrong — and `open` then throws for the missing native module.
+    Guarding only the import left the export failing silently with the file
+    stranded in a cache directory the user never looks in.
+  */
+  function brokenShareDeps() {
+    const written: string[] = [];
+    const writeFile = vi.fn(
+      async (path: string, _c: string, _e: string) => void written.push(path),
+    );
+    const open = vi.fn(async () => {
+      throw new Error(
+        "TurboModuleRegistry.getEnforcing(...): 'RNShare' could not be found.",
+      );
+    });
+    const loadModules: NonNullable<
+      RNFileExporterDeps["loadModules"]
+    > = async () => ({
+      fs: {
+        CachesDirectoryPath: "/cache",
+        DownloadDirectoryPath: "/Users/me/Downloads",
+        writeFile,
+        mkdir: vi.fn(async () => {}),
+        readDir: vi.fn(async (): Promise<Entry[]> => []),
+        unlink: vi.fn(async () => {}),
+        exists: vi.fn(async () => false),
+      },
+      share: { open },
+    });
+    return { written, open, loadModules };
+  }
+
+  it("falls back to writing a real file", async () => {
+    const fakes = brokenShareDeps();
+    await new RNFileExporter({
+      loadModules: fakes.loadModules,
+      makeExportId: () => "save-1",
+    }).save("Quartet.mid", new Uint8Array([1]), "audio/midi");
+
+    expect(fakes.open).toHaveBeenCalled();
+    // The last write is the one the user can actually find.
+    expect(fakes.written.at(-1)).toBe("/Users/me/Downloads/Quartet.mid");
+  });
+
+  it("does not report the failure to the caller", async () => {
+    // An export that lands in Downloads is a success, not an error to show.
+    const fakes = brokenShareDeps();
+    await expect(
+      new RNFileExporter({ loadModules: fakes.loadModules }).save(
+        "Quartet.mid",
+        new Uint8Array([1]),
+        "audio/midi",
+      ),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("RNFileExporter told there is no share sheet", () => {
+  /*
+    The macOS case as the host reports it. `react-native-share` resolves there
+    and `open()` returns without doing anything, so the exporter has no failure
+    to observe — being told is the only reliable signal.
+  */
+  it("ignores a perfectly loadable share module and writes a file", async () => {
+    const fakes = desktopDeps();
+    const open = vi.fn(async () => undefined);
+    const loadModules: NonNullable<
+      RNFileExporterDeps["loadModules"]
+    > = async () => {
+      const real = await fakes.loadModules();
+      return { fs: real.fs, share: { open } };
+    };
+
+    await new RNFileExporter({ loadModules, shareSheet: false }).save(
+      "Quartet.mid",
+      new Uint8Array([1]),
+      "audio/midi",
+    );
+
+    expect(open).not.toHaveBeenCalled();
+    expect(fakes.written).toEqual([
+      { path: "/Users/me/Downloads/Quartet.mid", encoding: "base64" },
+    ]);
+  });
+
+  it("still uses the share sheet when not told otherwise", async () => {
+    const fakes = desktopDeps();
+    const open = vi.fn(async () => undefined);
+    const loadModules: NonNullable<
+      RNFileExporterDeps["loadModules"]
+    > = async () => {
+      const real = await fakes.loadModules();
+      return { fs: real.fs, share: { open } };
+    };
+
+    await new RNFileExporter({ loadModules }).save(
+      "Quartet.mid",
+      new Uint8Array([1]),
+      "audio/midi",
+    );
+    expect(open).toHaveBeenCalled();
+  });
+});
+
+describe("RNFileExporter choosing where a file goes", () => {
+  function fsWith(paths: Partial<Record<string, string>>) {
+    const written: string[] = [];
+    const loadModules: NonNullable<
+      RNFileExporterDeps["loadModules"]
+    > = async () => ({
+      fs: {
+        CachesDirectoryPath: "/cache",
+        ...paths,
+        writeFile: vi.fn(async (path: string) => void written.push(path)),
+        mkdir: vi.fn(async () => {}),
+        readDir: vi.fn(async (): Promise<Entry[]> => []),
+        unlink: vi.fn(async () => {}),
+        exists: vi.fn(async () => false),
+      } as never,
+      share: null,
+    });
+    return { written, loadModules };
+  }
+
+  it("prefers Downloads", async () => {
+    const f = fsWith({
+      DownloadDirectoryPath: "/Users/me/Downloads",
+      DocumentDirectoryPath: "/Users/me/Documents",
+    });
+    await new RNFileExporter({ loadModules: f.loadModules }).save(
+      "a.mid",
+      "x",
+      "audio/midi",
+    );
+    expect(f.written).toEqual(["/Users/me/Downloads/a.mid"]);
+  });
+
+  it("falls back to Documents where Downloads is undefined — the macOS case", async () => {
+    // `react-native-fs` defines no `DownloadDirectoryPath` on macOS.
+    const f = fsWith({ DocumentDirectoryPath: "/Users/me/Documents" });
+    await new RNFileExporter({ loadModules: f.loadModules }).save(
+      "a.mid",
+      "x",
+      "audio/midi",
+    );
+    expect(f.written).toEqual(["/Users/me/Documents/a.mid"]);
+  });
+
+  it("uses the cache only when there is nowhere better", async () => {
+    const f = fsWith({});
+    await new RNFileExporter({ loadModules: f.loadModules }).save(
+      "a.mid",
+      "x",
+      "audio/midi",
+    );
+    expect(f.written).toEqual(["/cache/a.mid"]);
+  });
+});
