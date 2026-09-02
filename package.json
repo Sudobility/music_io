@@ -1,6 +1,6 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.9.26",
+  "version": "0.9.27",
   "author": "Sudobility",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
