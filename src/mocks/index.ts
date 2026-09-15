@@ -31,6 +31,8 @@ export class MockFileExporter implements FileExporter {
 
 export { MockXmlParser };
 export type { MusicIo };
+// Platform-free, and identical on every entry: what a recording import offers.
+export * from "../shared/audio-import.js";
 
 export function createMusicIo(): MusicIo {
   const xmlParser = new MockXmlParser();

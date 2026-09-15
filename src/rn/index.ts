@@ -12,6 +12,8 @@ import type { MusicIo } from "../shared/types.js";
 
 export { RNXmlParser, RNFileExporter };
 export type { MusicIo };
+// Platform-free, and identical on every entry: what a recording import offers.
+export * from "../shared/audio-import.js";
 
 /**
  * Everything React Native provides.

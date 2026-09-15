@@ -53,6 +53,7 @@ be two, and `MidiInput`, which is a device rather than a file format.
 
 - `src/web/` — `SoundfontPlaybackEngine` and its scheduling/mixing modules (~1,500 lines, the bulk of this package), the offline soundfont renderer, `WebXmlParser`, `WebFileExporter`
 - `src/rn/` — `RNXmlParser`, `RNFileExporter`, a full audio codec (OS decoder via `react-native-audio-api`, shared encoders), and `playback/` — `RNSamplePlaybackEngine`, a sample-based FluidR3 engine
+- `src/shared/audio-import.ts` — what a recording import offers (`AUDIO_IMPORT_EXTENSIONS`, `AUDIO_MIME`, `audioMimeFor`, `isLongAudio`). Platform-free and re-exported from **every** entry, so both apps get the same list from `@sudobility/music_io` whichever export branch they resolve; `entries.test.ts` pins that
 - `src/shared/` — the `MusicIo` bundle type, the wav/mp3 encoders and mono mixdown, `midi/unsupported-midi-input.ts`, and `playback/` (score flattening, note cursor, dispatch window, master trim, MIDI maths) — the transport half both engines run. Everything here is pure logic over bytes and numbers, which is the test for belonging in it. **That test is necessary but not sufficient**: the MIDI and tracker codecs were pure logic over bytes too, and belonged in `@sudobility/music_codecs` because the *server* needs them. What stays here is what a platform must provide
 - `src/mocks/` — test doubles, including a small hand-rolled XML reader
 - `src/contract/` — `runPlatformContract`, the suite every entry is held to
