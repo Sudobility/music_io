@@ -125,6 +125,31 @@ function safeFilename(name: string): string {
   return !cleaned || cleaned === "." || cleaned === ".." ? "export" : cleaned;
 }
 
+/**
+ * A `file://` URL for a filesystem path.
+ *
+ * The path is **not** interpolated raw, and that is the whole point of this
+ * function. A score called `Test #1` writes a file of that name perfectly well
+ * — `writeFile` takes a path — but `file:///…/Test #1.mid` is a *URL*, and
+ * `#` opens a fragment there: `NSURL` reads the path as `…/Test ` and the rest
+ * as an anchor, so the share sheet is handed a file that does not exist.
+ * Measured on the iOS simulator: the sheet's item read "Test", with no type,
+ * no size and a blank document icon, where a plain title showed the name, the
+ * kind and the byte count. `?` does the same for a query, and a raw `%`,
+ * space or non-ASCII character is at best undefined.
+ *
+ * Encoded **per segment** rather than with `encodeURI`, which deliberately
+ * leaves `#`, `?` and `%` alone as URI syntax, and not with
+ * `encodeURIComponent` over the whole path, which would escape the separators
+ * too. The input is always a real filesystem path rather than a URL, so a
+ * literal `%` in a filename correctly becomes `%25` and nothing is
+ * double-encoded. The name the user sees is unaffected: the consumer decodes
+ * the last path component to display it.
+ */
+export function fileUrl(path: string): string {
+  return `file://${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
 function defaultExportId(): string {
   exportCounter = (exportCounter + 1) % Number.MAX_SAFE_INTEGER;
   const time = Date.now().toString(36);
@@ -231,7 +256,7 @@ export class RNFileExporter implements FileExporter {
     );
 
     await share.open({
-      url: `file://${path}`,
+      url: fileUrl(path),
       type: mimeType,
       // Cancelling a share sheet is a normal thing a user does, not an error.
       failOnCancel: false,

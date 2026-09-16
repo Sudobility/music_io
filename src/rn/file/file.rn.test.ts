@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { RNFileExporter } from "./file.rn.js";
+import { RNFileExporter, fileUrl } from "./file.rn.js";
 import type { RNFileExporterDeps } from "./file.rn.js";
 
 type Entry = { name: string; path: string; mtime?: Date | null };
@@ -117,6 +117,54 @@ describe("RNFileExporter", () => {
     expect(fakes.open.mock.calls[0]?.[0]).toMatchObject({
       url: `file://${SAVE_1}/.._nested_score.mid`,
     });
+  });
+
+  /*
+    A `#` in a title is the sharp case, and it shipped broken.
+
+    The file is written under its real name — `writeFile` takes a path — but
+    the share sheet is handed a *URL*, where `#` starts a fragment. Measured on
+    the iOS simulator before this: the sheet's item read "Test", with no kind,
+    no size and a blank document icon, because `NSURL` had resolved the path to
+    `…/Test ` and there is no such file. `?`, `%`, `&`, spaces and non-ASCII
+    are the same class of problem.
+  */
+  it("percent-encodes the shared URL without touching the written name", async () => {
+    const fakes = deps();
+
+    await new RNFileExporter({
+      loadModules: fakes.loadModules,
+      makeExportId: fakes.makeExportId,
+    }).save("Test #1 & More.mid", new Uint8Array([1]), "audio/midi");
+
+    // The name on disk is exactly what was asked for.
+    expect(fakes.writeFile.mock.calls[0]?.[0]).toBe(
+      `${SAVE_1}/Test #1 & More.mid`,
+    );
+    expect(fakes.open.mock.calls[0]?.[0]).toMatchObject({
+      url: `file://${EXPORTS}/save-1/Test%20%231%20%26%20More.mid`,
+    });
+  });
+
+  it("builds a file URL that survives every character a title may hold", () => {
+    // A path of plain characters is left exactly as it was: the common case
+    // must not change, or every existing share would be a new URL.
+    expect(fileUrl("/cache/exports/score.mid")).toBe(
+      "file:///cache/exports/score.mid",
+    );
+    // Separators stay separators — `encodeURIComponent` over the whole path
+    // would escape them and produce a single opaque segment.
+    expect(fileUrl("/a/b/c")).toBe("file:///a/b/c");
+    // `#` and `?` are URL syntax; unescaped they truncate the path.
+    expect(fileUrl("/x/Test #1?.mid")).toBe("file:///x/Test%20%231%3F.mid");
+    // A literal `%` in a filename is a real `%`, so it encodes to `%25`.
+    // Nothing here is ever already a URL, so this cannot double-encode.
+    expect(fileUrl("/x/100%.mid")).toBe("file:///x/100%25.mid");
+    expect(fileUrl("/x/%20already.mid")).toBe("file:///x/%2520already.mid");
+    // Non-ASCII goes out as UTF-8 percent triples.
+    expect(fileUrl("/x/夜曲.mid")).toBe(
+      "file:///x/%E5%A4%9C%E6%9B%B2.mid",
+    );
   });
 
   it("does not allow dot-directory filenames", async () => {

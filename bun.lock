@@ -6,7 +6,7 @@
       "name": "music_io",
       "dependencies": {
         "@breezystack/lamejs": "^1.2.7",
-        "@sudobility/music_codecs": "^0.2.28",
+        "@sudobility/music_codecs": "^0.2.29",
       },
       "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -134,7 +134,7 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
-    "@sudobility/music_codecs": ["@sudobility/music_codecs@0.2.28", "", { "peerDependencies": { "@sudobility/music_types": "^0.13.27" } }, "sha512-fIuXPaR6eLkDqENzO3WNkk0KlhxJmqCPgpAsp1lTpSIUoAo0idufSwWs/x5/B4a18Exwgi+wfeWc1o524SCQDg=="],
+    "@sudobility/music_codecs": ["@sudobility/music_codecs@0.2.29", "", { "peerDependencies": { "@sudobility/music_types": "^0.13.27" } }, "sha512-Mb8zYor1tQo6w2Gb/i+yGS5Q3zgpfOrnNyk0e6EDSr5eKBd6AMWFMP8QwYT2X+SBP74PQthitx+qqGdma/p+Hg=="],
 
     "@sudobility/music_types": ["@sudobility/music_types@0.13.27", "", { "dependencies": { "immer": "^10.0.0 || ^11.0.0", "zod": "^4.0.0" }, "peerDependencies": { "@sudobility/types": "^1.9.67" } }, "sha512-v0/+Xc8szRdldrumYL4rHuIC+aPP8Axebfjf8X6l7Uqs5oFgSJCVHEv8H8F6WqNymZKEQ0gq+8F/G3gU/jDEcQ=="],
 
