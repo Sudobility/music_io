@@ -1,11 +1,10 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.9.43",
+  "version": "0.9.44",
   "author": "Sudobility",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sudobility/music_codecs": "^0.2.1",
-    "@sudobility/music_types": "^0.13.26",
+    "@sudobility/music_types": "^0.13.27",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
     "eslint": "^9.38.0",
@@ -18,7 +17,7 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
-    "@sudobility/music_types": "^0.13.26",
+    "@sudobility/music_types": "^0.13.27",
     "fast-xml-parser": ">=5.0.0",
     "react-native-fs": ">=2.20.0",
     "react-native-share": ">=10.0.0"
@@ -50,16 +49,6 @@
       "types": "./dist/mocks/index.d.ts",
       "import": "./dist/mocks/index.js",
       "default": "./dist/mocks/index.js"
-    },
-    "./rn/expression-table": {
-      "types": "./dist/rn/playback/expression-table.d.ts",
-      "import": "./dist/rn/playback/expression-table.js",
-      "default": "./dist/rn/playback/expression-table.js"
-    },
-    "./rn/gm-pack-name": {
-      "types": "./dist/rn/playback/gm-pack-name.d.ts",
-      "import": "./dist/rn/playback/gm-pack-name.js",
-      "default": "./dist/rn/playback/gm-pack-name.js"
     }
   },
   "description": "Platform implementations for ScoreSmith: audio codecs, XML parsing, file export and live MIDI input, for web and React Native",
@@ -101,6 +90,6 @@
   "type": "module",
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
-    "@sudobility/music_codecs": "^0.2.1"
+    "@sudobility/music_codecs": "^0.2.28"
   }
 }

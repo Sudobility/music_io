@@ -24,10 +24,9 @@ describe("entry points", () => {
       "./mocks/index.js",
     ]) {
       const mod = (await import(entry)) as Record<string, unknown>;
-      expect(mod.AUDIO_IMPORT_EXTENSIONS, entry).toBe(
-        shared.AUDIO_IMPORT_EXTENSIONS,
-      );
-      expect(mod.AUDIO_MIME, entry).toBe(shared.AUDIO_MIME);
+      // The extension list and MIME table are vocabulary, in music_types.
+      expect(mod.AUDIO_IMPORT_EXTENSIONS, entry).toBeUndefined();
+      expect(mod.AUDIO_MIME, entry).toBeUndefined();
       expect(mod.audioMimeFor, entry).toBe(shared.audioMimeFor);
       expect(mod.isLongAudio, entry).toBe(shared.isLongAudio);
     }

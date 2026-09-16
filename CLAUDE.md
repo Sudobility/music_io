@@ -5,9 +5,11 @@
 > explicitly asks in that turn**. Approval for an earlier change does not carry forward, and
 > finishing a task is not permission to commit it.
 
-Platform implementations for Moosiac: score and audio **files**, XML parsing and
-live MIDI input, for web and React Native. One of seven repos in the family
-— see `music_app/docs/architecture.md`.
+Platform implementations for Moosiac: **files and audio**. The open/save layer
+over the score codecs (`createScoreFiles`), reading an audio file's name or size
+(`audioMimeFor`, `isLongAudio`), audio encoding and decoding, the filesystem, XML
+parsing and live MIDI input, for web and React Native. One of the repos in the
+family — see `music_app/docs/architecture.md`.
 
 The contracts live in `@sudobility/music_types`; this package implements them so
 `@sudobility/music_lib` can stay free of any platform library and run unchanged
@@ -38,11 +40,11 @@ be two, and `MidiInput`, which is a device rather than a file format.
 ## Tech Stack
 
 - TypeScript (strict, ESM only), Bun, **Vitest** (not `bun test`)
-- `js-synthesizer` (libfluidsynth in an AudioWorklet — the web engine),
-  `fast-xml-parser` (RN XML), `react-native-fs` /
-  `react-native-share` (RN file export) — **all optional peer dependencies**.
-  `@breezystack/lamejs` is the one runtime dependency; see Gotchas. `tone` is
-  gone: the web engine is the soundfont synth, and RN has no engine at all.
+- `fast-xml-parser` (RN XML), `react-native-fs` / `react-native-share` (RN file
+  export) — **all optional peer dependencies**. Runtime dependencies are
+  `@breezystack/lamejs` (mp3; see Gotchas for why it is not a peer) and `@sudobility/music_codecs` (what the
+  `open*`/`save*` layer calls). No synth: `js-synthesizer` and both engines are
+  `@sudobility/music_player`'s.
 
 ## Commands
 
@@ -51,10 +53,11 @@ be two, and `MidiInput`, which is a device rather than a file format.
 
 ## Structure
 
-- `src/web/` — `SoundfontPlaybackEngine` and its scheduling/mixing modules (~1,500 lines, the bulk of this package), the offline soundfont renderer, `WebXmlParser`, `WebFileExporter`
-- `src/rn/` — `RNXmlParser`, `RNFileExporter`, a full audio codec (OS decoder via `react-native-audio-api`, shared encoders), and `playback/` — `RNSamplePlaybackEngine`, a sample-based FluidR3 engine
-- `src/shared/audio-import.ts` — what a recording import offers (`AUDIO_IMPORT_EXTENSIONS`, `AUDIO_MIME`, `audioMimeFor`, `isLongAudio`). Platform-free and re-exported from **every** entry, so both apps get the same list from `@sudobility/music_io` whichever export branch they resolve; `entries.test.ts` pins that
-- `src/shared/` — the `MusicIo` bundle type, the wav/mp3 encoders and mono mixdown, `midi/unsupported-midi-input.ts`, and `playback/` (score flattening, note cursor, dispatch window, master trim, MIDI maths) — the transport half both engines run. Everything here is pure logic over bytes and numbers, which is the test for belonging in it. **That test is necessary but not sufficient**: the MIDI and tracker codecs were pure logic over bytes too, and belonged in `@sudobility/music_codecs` because the *server* needs them. What stays here is what a platform must provide
+- `src/web/` — `WebXmlParser`, `WebFileExporter`, the web audio codec and `web-midi-input.ts`. The playback engines and offline renderer that used to be the bulk of this package are `@sudobility/music_player`'s
+- `src/rn/` — `RNXmlParser`, `RNFileExporter` and a full audio codec (OS decoder via `react-native-audio-api`, shared encoders)
+- `src/shared/score-files.ts` — `createScoreFiles`, the `open*`/`save*` layer; the `ScoreFiles` type it returns is music_types' (`platform/score-files.ts`)
+- `src/shared/audio-import.ts` — `audioMimeFor` and `isLongAudio`, the file-reading half of a recording import. Platform-free and re-exported from **every** entry; `entries.test.ts` pins that. The extension list and MIME table (`AUDIO_IMPORT_EXTENSIONS`, `AUDIO_MIME`) are vocabulary and live in music_types, and the `ScoreFiles` contract sits in music_types' `platform/` beside `XmlParser` and `FileExporter` (`createScoreFiles` stays here). `src/__moved-to-types.test.ts` keeps both out — as a declaration, a re-export or a runtime export of any entry — because music_lib re-exports music_types wholesale, so an app importing this package beside it would reach two declarations of one name. (music_lib does not re-export this package, so here that is drift and ambiguity rather than the TS2308 / "Cannot redefine property" failure it is in the packages music_lib does re-export.) It also checks every export-map entry points at a real module — `./rn/expression-table` and `./rn/gm-pack-name` pointed at files that are music_player's, and were removed
+- `src/shared/` — the `MusicIo` bundle type, the wav/mp3 encoders and mono mixdown (`toMono`), and `midi/unsupported-midi-input.ts`. Everything here is pure logic over bytes and numbers, which is the test for belonging in it. **That test is necessary but not sufficient**: the MIDI and tracker codecs were pure logic over bytes too, and belonged in `@sudobility/music_codecs` because the *server* needs them. What stays here is what a platform must provide
 - `src/mocks/` — test doubles, including a small hand-rolled XML reader
 - `src/contract/` — `runPlatformContract`, the suite every entry is held to
 
@@ -89,7 +92,8 @@ be two, and `MidiInput`, which is a device rather than a file format.
   packages do not depend on each other. The app renders, then hands the samples
   over.
 
-- **This package must not import `@sudobility/music_lib` or `@sudobility/music_player`.** The two platform packages deliberately do not depend on each other, which is why audio export is orchestrated by the caller. It is the platform layer — bytes, audio, files — and music_lib is the domain. `src/contract/no-music-lib.test.ts` enforces it over both `src/` and `package.json`. The rule held once and was lost gradually: `PlaybackEngine.loadScore` took a `Score`, and an engine holding a score then needed tempo maths, tie joining and the GM tables to do anything with it. By the end the two packages were mutually dependent and neither could be type-checked at release time until the other had published. Engines now take a `PlaybackPlan` — notes in ticks with their ids, metronome clicks, tracks with their **resolved** GM voice, and tick↔second conversion as a `TempoConversion` — so every musical question is already answered before the platform layer sees it. Engine tests build plans with `shared/playback/test-plan.ts` rather than importing a score fixture.
+- **This package must not import `@sudobility/music_lib` or `@sudobility/music_player`.** The two platform packages deliberately do not depend on each other, which is why audio export is orchestrated by the caller. It is the platform layer — bytes, audio, files — and music_lib is the domain. `src/contract/no-music-lib.test.ts` enforces it over both `src/` and `package.json`. The rule held once and was lost gradually, while the engines still lived here: `PlaybackEngine.loadScore` took a `Score`, and an engine holding a score then needed tempo maths, tie joining and the GM tables to do anything with it. By the end music_io and music_lib were mutually dependent and neither could be type-checked at release time until the other had published. The fix was a plan — notes in ticks with their ids, metronome clicks, tracks with their **resolved** GM voice, and tick↔second conversion as a `TempoConversion` — so every musical question is answered before a platform layer sees it. The engines, `PlaybackEngine.load(plan)` and the plan-building test helper (`src/shared/test-plan.ts`) have all since moved to `@sudobility/music_player`; what this package keeps of the lesson is the dependency rule.
+- **`@breezystack/lamejs` is a runtime `dependency`, not an optional peer, and it is the one exception.** A React Native app must never pull a browser audio library into its graph, which is why the XML and file-export libraries are optional peers. lamejs is not one for two concrete reasons: `shared/audio/mp3.ts` imports it *statically* and both `web/audio/web-audio-codec.ts` and `rn/audio-codec.ts` import that module, so an app that skipped installing it would fail to load the whole entry rather than just mp3 export; and `AudioCodec.encodeMp3` is synchronous in `music_types`, so it cannot be made lazy the way the RN decoder's `react-native-audio-api` import is without changing that interface across repos. It is pure JS and runs under Metro, so it is not a platform library at all.
 - **The export map is the whole mechanism.** `"react-native"` resolves to
   `dist/rn`, `"default"` to `dist/web`, so app code writes one import and never
   branches on platform. `./web`, `./rn` and `./mocks` stay addressable for tests.

@@ -1,4 +1,4 @@
-import type { ScoreFiles } from "./score-files.js";
+import type { ScoreFiles } from "@sudobility/music_types";
 import type {
   AudioCodec,
   FileExporter,

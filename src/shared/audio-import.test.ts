@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
-import {
-  AUDIO_IMPORT_EXTENSIONS,
-  AUDIO_MIME,
-  audioMimeFor,
-  isLongAudio,
-} from "./audio-import.js";
+import { AUDIO_IMPORT_EXTENSIONS, AUDIO_MIME } from "@sudobility/music_types";
+import { audioMimeFor, isLongAudio } from "./audio-import.js";
 
 describe("audio import", () => {
   it("offers the recording formats the transcriber accepts, each with a MIME type", () => {
-    expect(AUDIO_IMPORT_EXTENSIONS).toEqual(["wav", "mp3", "mpa", "m4a", "aac"]);
+    expect(AUDIO_IMPORT_EXTENSIONS).toEqual([
+      "wav",
+      "mp3",
+      "mpa",
+      "m4a",
+      "aac",
+    ]);
     for (const extension of AUDIO_IMPORT_EXTENSIONS) {
       expect(AUDIO_MIME[extension]).toMatch(/^audio\//);
     }

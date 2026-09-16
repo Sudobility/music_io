@@ -33,17 +33,9 @@ import {
   trackerToScore,
 } from "@sudobility/music_codecs";
 import type {
-  MidiImportOptions,
-  MidiImportResult,
-  MidiSummary,
-  MusicXmlImportResult,
-  MusicXmlWarnings,
-  TrackerModule,
-} from "@sudobility/music_codecs";
-import type {
   AudioCodec,
   FileExporter,
-  Score,
+  ScoreFiles,
   XmlParser,
 } from "@sudobility/music_types";
 
@@ -55,26 +47,6 @@ const MIME = {
   wav: "audio/wav",
   mp3: "audio/mpeg",
 } as const;
-
-export type ScoreFiles = {
-  openMidi(bytes: ArrayBuffer, options: MidiImportOptions): MidiImportResult;
-  analyzeMidi(bytes: ArrayBuffer): MidiSummary;
-  openTracker(bytes: ArrayBuffer): { module: TrackerModule; score: Score };
-  openMusicXml(
-    text: string,
-    warnings: MusicXmlWarnings,
-  ): Promise<MusicXmlImportResult>;
-
-  saveMidi(score: Score, filename: string): Promise<void>;
-  saveTracker(module: TrackerModule, filename: string): Promise<void>;
-  saveMusicXml(score: Score, filename: string): Promise<void>;
-  saveAudio(
-    samples: Float32Array,
-    sampleRate: number,
-    format: "wav" | "mp3",
-    filename: string,
-  ): Promise<void>;
-};
 
 export function createScoreFiles(deps: {
   xmlParser: XmlParser;
