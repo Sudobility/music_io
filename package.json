@@ -1,10 +1,10 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.9.45",
+  "version": "0.9.46",
   "author": "Sudobility",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sudobility/music_types": "^0.13.27",
+    "@sudobility/music_types": "^0.13.28",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
     "eslint": "^9.38.0",
@@ -17,7 +17,7 @@
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
-    "@sudobility/music_types": "^0.13.27",
+    "@sudobility/music_types": "^0.13.28",
     "fast-xml-parser": ">=5.0.0",
     "react-native-fs": ">=2.20.0",
     "react-native-share": ">=10.0.0"
@@ -80,16 +80,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rimraf dist",
-    "test": "vitest run",
+    "test:unit": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "verify": "bun run typecheck && bun run lint && bun run test && bun run build",
+    "verify": "bun run typecheck && bun run lint && bun run test:unit && bun run build",
     "prepublishOnly": "bun run clean && bun run verify"
   },
   "type": "module",
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
-    "@sudobility/music_codecs": "^0.2.29"
+    "@sudobility/music_codecs": "^0.2.30"
   }
 }
