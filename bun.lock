@@ -7,8 +7,8 @@
       "devDependencies": {
         "@breezystack/lamejs": "^1.2.7",
         "@eslint/js": "^10.0.1",
-        "@sudobility/music_codecs": "^0.2.51",
-        "@sudobility/music_types": "^0.13.49",
+        "@sudobility/music_codecs": "^0.2.52",
+        "@sudobility/music_types": "^0.13.50",
         "@types/node": "^22.20.3",
         "@typescript-eslint/eslint-plugin": "^8.65.0",
         "@typescript-eslint/parser": "^8.65.0",
@@ -23,8 +23,8 @@
       },
       "peerDependencies": {
         "@breezystack/lamejs": "^1.2.7",
-        "@sudobility/music_codecs": "^0.2.51",
-        "@sudobility/music_types": "^0.13.49",
+        "@sudobility/music_codecs": "^0.2.52",
+        "@sudobility/music_types": "^0.13.50",
         "fast-xml-parser": ">=5.0.0",
         "react-native-fs": ">=2.20.0",
         "react-native-share": ">=10.0.0",
@@ -135,9 +135,9 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
-    "@sudobility/music_codecs": ["@sudobility/music_codecs@0.2.51", "", { "peerDependencies": { "@sudobility/music_types": "^0.13.49" } }, "sha512-tHctv9KLEXJDr9OQ8p60APW7rwlFAKxqvKCBlx/rb9/+0ZFy+Ausne1sZFx6WWqVEzhnLUByUy9zqhRDVDmMRQ=="],
+    "@sudobility/music_codecs": ["@sudobility/music_codecs@0.2.52", "", { "peerDependencies": { "@sudobility/music_types": "^0.13.50" } }, "sha512-qnZURknzvXZ0vjvQxvWU3yi+j9JJVNWUUl/fVz2nhIDk9yI2822EtcjLEMjb74We18v3d3gxIi80zgAQ49N2yQ=="],
 
-    "@sudobility/music_types": ["@sudobility/music_types@0.13.49", "", { "peerDependencies": { "@sudobility/types": "^1.9.68", "immer": "^10.0.0 || ^11.0.0", "zod": "^4.0.0" } }, "sha512-4jXSBfeuAC5IQsbQVaE2wVvhwv4hITVO81bkLT7cO5Gk8BfzUOmJy3aaQs513lawi5LOS0YYF/fEv2l/OCsYHQ=="],
+    "@sudobility/music_types": ["@sudobility/music_types@0.13.50", "", { "peerDependencies": { "@sudobility/types": "^1.9.68", "immer": "^10.0.0 || ^11.0.0", "zod": "^4.0.0" } }, "sha512-G9HY1iYWKiRnwbtOtGmzixORf/2gYZLK2U5c+njb6OGNULOYNLZz9KRr5BUx/VgTNoD2UZAfNe2DBuZ31RLdOA=="],
 
     "@sudobility/types": ["@sudobility/types@1.9.62", "", {}, "sha512-GOkz5oE7Fmlolba2aemBF2fKPtH4I2lHAjVta+fqZAoAV72DQaWYzVEjTwKZs/ACY/g9Z262IDa7lEh+IOrn7w=="],
 
