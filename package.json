@@ -1,12 +1,12 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.9.71",
+  "version": "0.9.72",
   "author": "Sudobility",
   "devDependencies": {
     "@breezystack/lamejs": "^1.2.7",
     "@eslint/js": "^10.0.1",
-    "@sudobility/music_codecs": "^0.2.55",
-    "@sudobility/music_types": "^0.13.52",
+    "@sudobility/music_codecs": "^0.2.56",
+    "@sudobility/music_types": "^0.13.53",
     "@types/node": "^22.20.3",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
@@ -21,8 +21,8 @@
   },
   "peerDependencies": {
     "@breezystack/lamejs": "^1.2.7",
-    "@sudobility/music_codecs": "^0.2.55",
-    "@sudobility/music_types": "^0.13.52",
+    "@sudobility/music_codecs": "^0.2.56",
+    "@sudobility/music_types": "^0.13.53",
     "fast-xml-parser": ">=5.0.0",
     "react-native-fs": ">=2.20.0",
     "react-native-share": ">=10.0.0"
@@ -92,5 +92,9 @@
     "verify": "bun run typecheck && bun run lint && bun run test:unit && bun run build",
     "prepublishOnly": "bun run clean && bun run verify"
   },
-  "type": "module"
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sudobility/music_io.git"
+  }
 }
