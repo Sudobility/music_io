@@ -1,6 +1,6 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.9.73",
+  "version": "0.9.74",
   "author": "Sudobility",
   "devDependencies": {
     "@breezystack/lamejs": "^1.2.7",
