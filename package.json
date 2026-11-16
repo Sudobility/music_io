@@ -1,12 +1,12 @@
 {
   "name": "@sudobility/music_io",
-  "version": "0.9.88",
+  "version": "0.9.89",
   "author": "Sudobility",
   "devDependencies": {
     "@breezystack/lamejs": "~1.2.7",
     "@eslint/js": "~10.0.1",
-    "@sudobility/music_codecs": "^0.2.70",
-    "@sudobility/music_types": "^0.13.70",
+    "@sudobility/music_codecs": "^0.2.71",
+    "@sudobility/music_types": "^0.13.71",
     "@types/node": "~22.20.5",
     "@typescript-eslint/eslint-plugin": "~8.72.0",
     "@typescript-eslint/parser": "~8.72.0",
@@ -21,11 +21,12 @@
   },
   "peerDependencies": {
     "@breezystack/lamejs": "^1.2.7",
-    "@sudobility/music_codecs": "^0.2.70",
-    "@sudobility/music_types": "^0.13.70",
+    "@sudobility/music_codecs": "^0.2.71",
+    "@sudobility/music_types": "^0.13.71",
     "fast-xml-parser": ">=5.0.0",
     "react-native-fs": ">=2.20.0",
-    "react-native-share": ">=10.0.0"
+    "react-native-share": ">=10.0.0",
+    "@sudobility/types": "^1.11.2"
   },
   "exports": {
     ".": {
